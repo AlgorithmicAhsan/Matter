@@ -31,6 +31,11 @@ app.mount("/models", StaticFiles(directory=str(MODELS_DIR)), name="models")
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 
 
+# ── Configuration ─────────────────────────────────────────────────────────────
+# Set to 0 for default webcam, 1 or 2 for other cameras (like DroidCam)
+# Or set to a URL for direct IP camera: "http://192.168.1.XX:4747/video"
+CAMERA_SOURCE = 0
+
 # ── Global State ──────────────────────────────────────────────────────────────
 class SessionState:
     def __init__(self):
@@ -40,7 +45,7 @@ class SessionState:
         self.cap = None
         self.recording = False
         self.running = False
-        self.source = 0         # 0 = webcam, or path to video file
+        self.source = CAMERA_SOURCE         # Use the config variable here
         self.last_landmarks = None
         self.frame_count = 0
 
@@ -106,10 +111,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
 
             # Process frame
-            landmarks, _ = state.extractor.process_frame(frame)
+            landmarks, annotated = state.extractor.process_frame(frame)
             uncertainty_result = state.scorer.score(landmarks)
             state.last_landmarks = landmarks
             state.frame_count += 1
+
+            # Encode annotated frame for preview
+            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            import base64
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
 
             # Add to BVH if recording
             if state.recording:
@@ -119,6 +129,7 @@ async def websocket_endpoint(websocket: WebSocket):
             payload = {
                 "frame": state.frame_count,
                 "recording": state.recording,
+                "image": frame_base64,       # New: annotated video frame
                 "bvh_frames": len(state.writer.frames),
                 "bvh_skipped": state.writer.skipped,
                 "uncertainty": {
@@ -129,6 +140,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 },
                 "landmarks": landmarks if landmarks else None
             }
+
+            if state.frame_count % 100 == 0:
+                print(f"Streaming frame {state.frame_count} (Image size: {len(frame_base64)} bytes)")
 
             await websocket.send_text(json.dumps(payload))
 

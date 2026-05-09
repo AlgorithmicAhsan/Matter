@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # Core Computer Vision & Pose Detection
-mediapipe==0.10.9          # Google's pose estimation framework (33 landmarks)
+mediapipe>=0.10.14          # Updated to support newer protobuf versions
 
 # Video & Image Processing
 opencv-python>=4.5.0         # OpenCV - camera capture, image processing

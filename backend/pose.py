@@ -23,6 +23,7 @@ class PoseExtractor:
     def __init__(self):
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
+            model_complexity=1,       # 0=Lite, 1=Full, 2=Heavy
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )

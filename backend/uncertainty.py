@@ -13,7 +13,7 @@ class UncertaintyScorer:
     If total uncertainty > threshold -> frame is untrusted -> avatar holds last pose
     """
 
-    def __init__(self, mc_passes=20, noise_std=0.01, threshold=0.35):
+    def __init__(self, mc_passes=20, noise_std=0.01, threshold=0.6):
         """
         mc_passes  : number of Monte Carlo passes to simulate epistemic uncertainty
         noise_std  : std of Gaussian noise injected per MC pass (in normalized coords)
