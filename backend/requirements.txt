@@ -1,0 +1,26 @@
+# PosiSim Backend Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core Computer Vision & Pose Detection
+mediapipe==0.10.9          # Google's pose estimation framework (33 landmarks)
+
+# Video & Image Processing
+opencv-python>=4.5.0         # OpenCV - camera capture, image processing
+
+# Web Framework & Server
+fastapi>=0.95.0              # Modern Python web framework
+uvicorn[standard]>=0.20.0    # ASGI server for FastAPI
+
+# Real-time Communication
+websockets>=11.0             # WebSocket server for live data streaming
+
+# Numerical Computing
+numpy>=1.21.0                # NumPy - mathematical operations, arrays
+
+# HTTP & Form Handling
+python-multipart>=0.0.5      # Multipart form data handling for FastAPI
+
+# Optional: For development
+# pytest>=7.0.0              # Testing framework
+# black>=22.0.0              # Code formatter
+# flake8>=4.0.0              # Code linter

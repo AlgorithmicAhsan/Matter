@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PosiSim - Motion Capture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #main-content {
+            display: flex;
+            flex: 1;
+            gap: 1px;
+            background: #1a1a1f;
+            padding: 10px;
+        }
+
+        .panel {
+            background: #0f0f14;
+            border: 1px solid #222;
+            border-radius: 8px;
+        }
+
+        #canvas-panel {
+            flex: 1;
+            position: relative;
+            min-width: 600px;
+        }
+
+        #canvas-panel canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #dashboard-panel {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .dashboard-section {
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #00d4ff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: #888;
+        }
+
+        .stat-value {
+            color: #00d4ff;
+            font-weight: 600;
+        }
+
+        #uncertainty-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .bar-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .bar-label {
+            font-size: 12px;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .bar-fill {
+            height: 20px;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            border-radius: 4px;
+            transition: width 0.3s ease, background 0.3s ease;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        #trust-badge {
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: 700;
+            font-size: 14px;
+            margin-top: 15px;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        #trust-badge.trusted {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+            border: 2px solid #00ff88;
+        }
+
+        #trust-badge.untrusted {
+            background: rgba(255, 50, 50, 0.2);
+            color: #ff3232;
+            border: 2px solid #ff3232;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        #uncertainty-graph {
+            width: 100%;
+            height: 120px;
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid #222;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        #control-bar {
+            background: #0f0f14;
+            border-top: 1px solid #222;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #start-btn {
+            background: #00ff88;
+            color: #000;
+        }
+
+        #start-btn:hover:not(:disabled) {
+            background: #00dd77;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.5);
+        }
+
+        #stop-btn {
+            background: #ff3232;
+            color: #fff;
+        }
+
+        #stop-btn:hover:not(:disabled) {
+            background: #ee2222;
+            box-shadow: 0 0 15px rgba(255, 50, 50, 0.5);
+        }
+
+        #save-btn {
+            background: #00d4ff;
+            color: #000;
+        }
+
+        #save-btn:hover:not(:disabled) {
+            background: #00b8cc;
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.5);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-info {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff3232;
+        }
+
+        .status-indicator.connected {
+            background: #00ff88;
+            box-shadow: 0 0 8px rgba(0, 255, 136, 0.8);
+        }
+
+        .status-text {
+            color: #888;
+        }
+
+        .status-value {
+            color: #00d4ff;
+            font-weight: 600;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f0f14;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="main-content">
+            <div id="canvas-panel" class="panel">
+                <div id="3d-canvas" style="width:100%; height:100%;"></div>
+            </div>
+            <div id="dashboard-panel" class="panel">
+                <div class="dashboard-section">
+                    <div class="section-title">Frame Data</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Current Frame</span>
+                        <span class="stat-value" id="frame-count">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">BVH Frames</span>
+                        <span class="stat-value" id="bvh-frames">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Skipped</span>
+                        <span class="stat-value" id="skipped-frames">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Coverage</span>
+                        <span class="stat-value" id="coverage-pct">0%</span>
+                    </div>
+                </div>
+
+                <div class="dashboard-section">
+                    <div class="section-title">Uncertainty Metrics</div>
+                    <div id="uncertainty-bars">
+                        <div class="bar-container">
+                            <div class="bar-label">
+                                <span>Aleatoric</span>
+                                <span id="aleatoric-val">0.00</span>
+                            </div>
+                            <div class="bar-fill" id="aleatoric-bar"></div>
+                        </div>
+                        <div class="bar-container">
+                            <div class="bar-label">
+                                <span>Epistemic</span>
+                                <span id="epistemic-val">0.00</span>
+                            </div>
+                            <div class="bar-fill" id="epistemic-bar"></div>
+                        </div>
+                        <div class="bar-container">
+                            <div class="bar-label">
+                                <span>Total</span>
+                                <span id="total-val">0.00</span>
+                            </div>
+                            <div class="bar-fill" id="total-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-section">
+                    <div class="section-title">Status</div>
+                    <div id="trust-badge" class="trusted">TRUSTED</div>
+                </div>
+
+                <div class="dashboard-section">
+                    <div class="section-title">Uncertainty History</div>
+                    <canvas id="uncertainty-graph"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div id="control-bar">
+            <div class="button-group">
+                <button id="start-btn">▶ Start Recording</button>
+                <button id="stop-btn" disabled>⏹ Stop Recording</button>
+                <button id="save-btn" disabled>💾 Save BVH</button>
+            </div>
+            <div class="status-info">
+                <div class="status-item">
+                    <div class="status-indicator" id="ws-indicator"></div>
+                    <span class="status-text">WebSocket: <span class="status-value" id="ws-status">Connecting...</span></span>
+                </div>
+                <div class="status-item">
+                    <span class="status-text">FPS: <span class="status-value" id="fps-counter">0</span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- App Scripts -->
+    <script src="/frontend/avatar.js"></script>
+    <script src="/frontend/uncertainty_ui.js"></script>
+    <script>
+        // Main app controller
+        class PosiSimApp {
+            constructor() {
+                this.ws = null;
+                this.avatar = null;
+                this.ui = null;
+                this.recording = false;
+                this.lastFrameTime = Date.now();
+                this.frameCount = 0;
+                this.fpsUpdateInterval = 0;
+
+                this.setupUI();
+                this.connectWebSocket();
+                this.startFPSCounter();
+            }
+
+            setupUI() {
+                document.getElementById('start-btn').onclick = () => this.startRecording();
+                document.getElementById('stop-btn').onclick = () => this.stopRecording();
+                document.getElementById('save-btn').onclick = () => this.saveBVH();
+            }
+
+            connectWebSocket() {
+                this.ws = new WebSocket('ws://localhost:8000/ws');
+
+                this.ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    this.updateWSStatus('Connected', true);
+                    this.avatar = new AvatarRenderer('3d-canvas');
+                    this.ui = new UncertaintyUI();
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.event) {
+                            this.handleEvent(data);
+                        } else if (data.frame !== undefined) {
+                            this.handleFrame(data);
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse WebSocket message:', e);
+                    }
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateWSStatus('Error', false);
+                };
+
+                this.ws.onclose = () => {
+                    console.log('WebSocket closed');
+                    this.updateWSStatus('Disconnected', false);
+                    setTimeout(() => this.connectWebSocket(), 3000);
+                };
+            }
+
+            handleFrame(data) {
+                this.frameCount++;
+                
+                // Update dashboard
+                document.getElementById('frame-count').textContent = data.frame;
+                document.getElementById('bvh-frames').textContent = data.bvh_frames;
+                document.getElementById('skipped-frames').textContent = data.bvh_skipped;
+                
+                if (data.frame > 0) {
+                    const coverage = ((data.bvh_frames / (data.frame + 1)) * 100).toFixed(1);
+                    document.getElementById('coverage-pct').textContent = coverage + '%';
+                }
+
+                // Update uncertainty UI
+                if (this.ui && data.uncertainty) {
+                    this.ui.update(data.uncertainty);
+                }
+
+                // Update avatar (only if trusted)
+                if (this.avatar && data.landmarks && data.uncertainty.trusted) {
+                    this.avatar.updatePose(data.landmarks);
+                }
+            }
+
+            handleEvent(data) {
+                switch (data.event) {
+                    case 'recording_started':
+                        this.recording = true;
+                        document.getElementById('start-btn').disabled = true;
+                        document.getElementById('stop-btn').disabled = false;
+                        break;
+                    case 'bvh_saved':
+                        console.log('BVH saved:', data.filename);
+                        document.getElementById('save-btn').disabled = true;
+                        alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
+                        break;
+                }
+            }
+
+            startRecording() {
+                this.ws.send(JSON.stringify({ action: 'start_recording' }));
+            }
+
+            stopRecording() {
+                this.ws.send(JSON.stringify({ action: 'stop_recording' }));
+                this.recording = false;
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('save-btn').disabled = false;
+            }
+
+            saveBVH() {
+                this.ws.send(JSON.stringify({ action: 'save_bvh' }));
+            }
+
+            updateWSStatus(status, connected) {
+                document.getElementById('ws-status').textContent = status;
+                const indicator = document.getElementById('ws-indicator');
+                if (connected) {
+                    indicator.classList.add('connected');
+                } else {
+                    indicator.classList.remove('connected');
+                }
+            }
+
+            startFPSCounter() {
+                setInterval(() => {
+                    const now = Date.now();
+                    const delta = now - this.lastFrameTime;
+                    const fps = (this.frameCount / (delta / 1000)).toFixed(1);
+                    document.getElementById('fps-counter').textContent = fps;
+                    this.frameCount = 0;
+                    this.lastFrameTime = now;
+                }, 1000);
+            }
+        }
+
+        // Start app when page loads
+        window.addEventListener('load', () => {
+            new PosiSimApp();
+        });
+    </script>
+</body>
+</html>
