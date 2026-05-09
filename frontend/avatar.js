@@ -3,7 +3,7 @@ class AvatarRenderer {
         this.container = document.getElementById(containerId);
 
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0a0a0f);
+        this.scene.background = new THREE.Color(0xffffff);
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(
@@ -12,7 +12,7 @@ class AvatarRenderer {
             0.1,
             1000
         );
-        this.camera.position.set(0, 100, 250);
+        this.camera.position.set(0, 200, 250);
         this.camera.lookAt(0, 100, 0);
 
         // Renderer
@@ -26,7 +26,7 @@ class AvatarRenderer {
         this.setupLighting();
 
         // Grid floor
-        const grid = new THREE.GridHelper(500, 20, 0x222233, 0x111122);
+        const grid = new THREE.GridHelper(500, 20, 0xcccccc, 0xdddddd);
         this.scene.add(grid);
 
         // Controls
@@ -85,7 +85,7 @@ class AvatarRenderer {
 
             // Fix orientation — some converters export lying down
             this.model.rotation.x = 0;
-            this.model.rotation.y = 0;
+            this.model.rotation.y = Math.PI;  // face toward camera
             this.model.rotation.z = 0;
 
             // Auto scale and center
@@ -102,13 +102,14 @@ class AvatarRenderer {
             this.model.position.y = -box2.min.y;
             this.model.position.z = -center.z * scale;
 
-            // Override materials to solid color
+            // Enable skinning on existing materials and collect bones
             this.model.traverse((child) => {
                 if (child.isMesh || child.isSkinnedMesh) {
-                    child.material = new THREE.MeshLambertMaterial({
-                        color: 0x00d4ff,
-                        emissive: 0x002233,
-                    });
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => { m.skinning = true; });
+                    } else {
+                        child.material.skinning = true;
+                    }
                     child.castShadow = true;
                 }
                 // Collect bones
@@ -121,6 +122,7 @@ class AvatarRenderer {
             this.captureInitialPose();
 
             console.log('Avatar loaded. Bones found:', Object.keys(this.bones).length);
+            console.log('Available bones:', Object.keys(this.bones));
         }, (progress) => {
             if (progress.total > 0) {
                 console.log('Loading:', Math.round(progress.loaded / progress.total * 100) + '%');
@@ -145,47 +147,65 @@ class AvatarRenderer {
 
         const j = landmarks;
 
+        // Helper — proper 3D conversion
+        // X: mirrored, Y: flipped, Z: depth kept positive
+        const v = (lm, yScale = 1.0) => new THREE.Vector3(
+            1 - lm.x,
+            -lm.y * yScale,
+            lm.z * 0.5         // don't negate Z
+        );
+
         // Arms
-        this.rotateBone(this.boneMap.leftArm,      j[11], j[13]);
-        this.rotateBone(this.boneMap.rightArm,     j[12], j[14]);
-        this.rotateBone(this.boneMap.leftForeArm,  j[13], j[15]);
-        this.rotateBone(this.boneMap.rightForeArm, j[14], j[16]);
+        this.aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
+        this.aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
+        this.aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
+        this.aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
 
-        // Legs
-        this.rotateBone(this.boneMap.leftUpLeg,  j[23], j[25]);
-        this.rotateBone(this.boneMap.rightUpLeg, j[24], j[26]);
-        this.rotateBone(this.boneMap.leftLeg,    j[25], j[27]);
-        this.rotateBone(this.boneMap.rightLeg,   j[26], j[28]);
+        // Legs — higher Y scale
+        this.aimBone(this.boneMap.leftUpLeg,  v(j[23], 1.5), v(j[25], 1.5));
+        this.aimBone(this.boneMap.leftLeg,    v(j[25], 1.5), v(j[27], 1.5));
+        this.aimBone(this.boneMap.rightUpLeg, v(j[24], 1.5), v(j[26], 1.5));
+        this.aimBone(this.boneMap.rightLeg,   v(j[26], 1.5), v(j[28], 1.5));
+        // Spine
+        const hipV = v(j[23]).add(v(j[24])).multiplyScalar(0.5);
+        const shdV = v(j[11]).add(v(j[12])).multiplyScalar(0.5);
+        this.aimBone(this.boneMap.spine, hipV, shdV);
 
-        // Spine — from hip center to shoulder center
-        const hipCenter    = { x: (j[23].x + j[24].x) / 2, y: (j[23].y + j[24].y) / 2, z: (j[23].z + j[24].z) / 2 };
-        const shoulderCenter = { x: (j[11].x + j[12].x) / 2, y: (j[11].y + j[12].y) / 2, z: (j[11].z + j[12].z) / 2 };
-        this.rotateBone(this.boneMap.spine, hipCenter, shoulderCenter);
+        // Hips rotation — rotate avatar body as you rotate
+        const leftHip  = v(j[23]);
+        const rightHip = v(j[24]);
+        const hipDir   = new THREE.Vector3().subVectors(rightHip, leftHip).normalize();
+        const targetHipAngle = Math.atan2(hipDir.z, hipDir.x);
+        if (this.bones[this.boneMap.hips]) {
+            const hipQuat = new THREE.Quaternion();
+            hipQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetHipAngle);
+            this.bones[this.boneMap.hips].quaternion.slerp(hipQuat, 0.2);
+        }
 
         this.lastValidPose = this.capturePose();
     }
 
-    rotateBone(boneName, parentJoint, childJoint) {
+    aimBone(boneName, fromVec, toVec) {
         const bone = this.bones[boneName];
         if (!bone) return;
 
-        // Direction vector — flip Y because MediaPipe Y goes down, Three.js Y goes up
-        const dir = new THREE.Vector3(
-            childJoint.x - parentJoint.x,
-            -(childJoint.y - parentJoint.y),
-            childJoint.z - parentJoint.z
-        );
+        const targetDir = new THREE.Vector3()
+            .subVectors(toVec, fromVec)
+            .normalize();
 
-        if (dir.length() < 0.001) return;
-        dir.normalize();
+        if (targetDir.length() < 0.001) return;
 
-        // Rotate from default up direction to target direction
-        const up = new THREE.Vector3(0, 1, 0);
-        const quat = new THREE.Quaternion();
-        quat.setFromUnitVectors(up, dir);
+        const parentWorldQuat = new THREE.Quaternion();
+        if (bone.parent) {
+            bone.parent.getWorldQuaternion(parentWorldQuat);
+        }
 
-        // Smooth interpolation — 0.2 for responsive but not jittery
-        bone.quaternion.slerp(quat, 0.2);
+        const parentWorldQuatInv = parentWorldQuat.clone().invert();
+        const localTarget = targetDir.clone().applyQuaternion(parentWorldQuatInv);
+        const restDir = new THREE.Vector3(0, 1, 0);
+        const localQuat = new THREE.Quaternion().setFromUnitVectors(restDir, localTarget);
+
+        bone.quaternion.slerp(localQuat, 0.25);
     }
 
     capturePose() {

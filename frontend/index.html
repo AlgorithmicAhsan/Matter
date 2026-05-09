@@ -434,8 +434,8 @@
                     this.ui.update(data.uncertainty);
                 }
 
-                // Update avatar (only if trusted)
-                if (this.avatar && data.landmarks && data.uncertainty.trusted) {
+                // Update avatar (temporarily always update to test bone mapping)
+                if (this.avatar && data.landmarks) {
                     this.avatar.updatePose(data.landmarks);
                 }
             }
