@@ -59,6 +59,10 @@ class ActionController {
 
         // Locomotion state for animation blending: 'idle' | 'walk' | 'run' | 'crouch' | 'jump'
         this.locomotionState = 'idle';
+
+        this.poseMode       = false;   // when true, keyboard is ignored
+        this._poseWalkSpeed = 0;       // units/s set by pose transform
+        this._poseHipX      = undefined; // hip X position from pose
     }
 
     // ── Input ────────────────────────────────────────────────────────────────
@@ -88,13 +92,21 @@ class ActionController {
 
         // Forward / backward
         let localZ = 0;
-        if (this.has(ActionType.MOVE_FORWARD))  localZ += speed;
-        if (this.has(ActionType.MOVE_BACKWARD)) localZ -= cfg.backwardSpeed * (this.isCrouching ? cfg.crouchSpeedMult : 1);
+        // In pose mode, use the detected walk speed instead of fixed walkSpeed
+        const fwdSpeed = (this.poseMode && this._poseWalkSpeed > 0)
+            ? this._poseWalkSpeed : speed;
+        const bkdSpeed = (this.poseMode && this._poseWalkSpeed > 0)
+            ? this._poseWalkSpeed * 0.7 : cfg.backwardSpeed * (this.isCrouching ? cfg.crouchSpeedMult : 1);
+
+        if (this.has(ActionType.MOVE_FORWARD))  localZ += fwdSpeed;
+        if (this.has(ActionType.MOVE_BACKWARD)) localZ -= bkdSpeed;
 
         // Strafe
         let localX = 0;
-        if (this.has(ActionType.STRAFE_RIGHT)) localX += cfg.strafeSpeed;
-        if (this.has(ActionType.STRAFE_LEFT))  localX -= cfg.strafeSpeed;
+        if (!this.poseMode) {
+            if (this.has(ActionType.STRAFE_RIGHT)) localX += cfg.strafeSpeed;
+            if (this.has(ActionType.STRAFE_LEFT))  localX -= cfg.strafeSpeed;
+        }
 
         // Rotation
         let rotDelta = 0;
@@ -139,6 +151,11 @@ class ActionController {
         else if (moving || movingBack)     this.locomotionState = 'walk';
         else                               this.locomotionState = 'idle';
 
+        // MUST be here — after all integration
+        if (this.poseMode && this._poseHipX !== undefined) {
+            this.position.x = this._poseHipX;
+        }
+
         return {
             position:      this.position.clone(),
             rotationRad:   this.rotation,
@@ -156,6 +173,63 @@ class ActionController {
             isSprinting:    this.isSprinting,
             locomotionState: this.locomotionState,
         };
+    }
+
+    /**
+     * Called by the WebSocket handler with the active_actions list from the backend.
+     * Replaces all pose-owned actions; keyboard actions are unaffected.
+     * @param {string[]} activeActions  e.g. ["move_forward", "sprint"]
+     */
+    setPoseActions(activeActions) {
+        const POSE_OWNED = new Set([
+            ActionType.MOVE_FORWARD, ActionType.MOVE_BACKWARD,
+            ActionType.STRAFE_LEFT,  ActionType.STRAFE_RIGHT,
+            ActionType.TURN_LEFT,    ActionType.TURN_RIGHT,
+            ActionType.CROUCH,       ActionType.SPRINT,
+            ActionType.JUMP,
+        ]);
+
+        const incoming = new Set(activeActions);
+
+        for (const action of POSE_OWNED) {
+            if (incoming.has(action)) {
+                this.activate(action);
+            } else {
+                this.deactivate(action);
+            }
+        }
+    }
+
+    /**
+     * Called each frame when pose_mode is ON.
+     * Directly applies rotation delta, sets X from hip mirroring,
+     * and activates/deactivates walking based on anti-phase ankle detection.
+     * @param {object} transform  payload from backend compute_pose_transform()
+     */
+    applyPoseTransform(transform) {
+        if (!transform) return;
+
+        // Rotation: accumulate delta directly (no ambiguity, tracks exact movement)
+        this.rotation += transform.rotation_delta;
+
+        // X position: store hip position to apply after world space calculation
+        this._poseHipX = transform.hip_x_world;
+
+        // Walking: activate/deactivate based on anti-phase detection
+        this._poseWalkSpeed = transform.is_walking ? transform.walk_speed : 0;
+
+        if (transform.is_walking) {
+            if (transform.walk_direction === 1) {
+                this.active.add(ActionType.MOVE_FORWARD);
+                this.active.delete(ActionType.MOVE_BACKWARD);
+            } else {
+                this.active.add(ActionType.MOVE_BACKWARD);
+                this.active.delete(ActionType.MOVE_FORWARD);
+            }
+        } else {
+            this.active.delete(ActionType.MOVE_FORWARD);
+            this.active.delete(ActionType.MOVE_BACKWARD);
+        }
     }
 }
 
@@ -195,6 +269,7 @@ class KeyboardController {
     }
 
     _onKeyDown(e) {
+        if (this.ctrl.poseMode) return;   // ← Skip keyboard input in pose mode
         // Prevent browser from stealing game keys (incl. Ctrl which triggers browser shortcuts)
         if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Control'].includes(e.key)) {
             e.preventDefault();
@@ -212,6 +287,7 @@ class KeyboardController {
     }
 
     _onKeyUp(e) {
+        if (this.ctrl.poseMode) return;   // ← Skip keyboard input in pose mode
         const key = e.key.toLowerCase();
         this.pressedKeys.delete(key);
 
@@ -257,5 +333,76 @@ class KeyboardHUD {
             const k = btn.getAttribute('data-key');
             btn.classList.toggle('active', held.has(k));
         });
+    }
+}
+
+/**
+ * PoseModeController
+ * Manages the pose-mode toggle button and calibration progress bar in the UI.
+ * Communicates with the backend via the WebSocket send callback.
+ */
+class PoseModeController {
+    /**
+     * @param {function(object): void} wsSend  callback that JSON-stringifies and sends
+     */
+    constructor(wsSend) {
+        this._send       = wsSend;
+        this._poseMode   = false;
+        this._calibrated = false;
+
+        this._btn      = document.getElementById('pose-mode-btn');
+        this._bar      = document.getElementById('calib-bar-fill');
+        this._barWrap  = document.getElementById('calib-bar-wrap');
+        this._label    = document.getElementById('calib-label');
+
+        if (this._btn) {
+            this._btn.addEventListener('click', () => this._toggle());
+        }
+    }
+
+    _toggle() {
+        this._poseMode = !this._poseMode;
+        this._send({ action: 'set_pose_mode', enabled: this._poseMode });
+        this._updateBtn();
+        
+        // Show countdown when pose mode is turned ON
+        if (this._poseMode && window.posiSimApp) {
+            window.posiSimApp._showCountdown('Pose calibration starts in…');
+        }
+    }
+
+    /** Called each frame when a WS payload arrives. */
+    onFrame(poseMode, calibrated, calibProgress) {
+        this._poseMode   = poseMode;
+        this._calibrated = calibrated;
+        this._updateBtn();
+        this._updateCalibBar(calibrated, calibProgress);
+    }
+
+    _updateBtn() {
+        if (!this._btn) return;
+        if (this._poseMode) {
+            this._btn.textContent = this._calibrated ? '🎥 Pose ON' : '⏳ Calibrating…';
+            this._btn.classList.add('active');
+        } else {
+            this._btn.textContent = '🎥 Pose OFF';
+            this._btn.classList.remove('active');
+        }
+    }
+
+    _updateCalibBar(calibrated, progress) {
+        if (!this._barWrap) return;
+        if (calibrated || !this._poseMode) {
+            this._barWrap.style.display = 'none';
+            return;
+        }
+        this._barWrap.style.display = 'block';
+        if (this._bar)   this._bar.style.width = (progress * 100).toFixed(0) + '%';
+        if (this._label) this._label.textContent =
+            `Stand still — calibrating ${(progress * 100).toFixed(0)}%`;
+    }
+
+    resetCalibration() {
+        this._send({ action: 'reset_calibration' });
     }
 }

@@ -201,7 +201,7 @@ class ActionController:
         return {
             "position": self.position.tolist(),
             "rotation": self.rotation,
-            "active_actions": [a.name for a in self.active_actions.keys()],
+            "active_actions": [a.value for a in self.active_actions.keys()],
             "is_grounded": self.is_grounded,
             "is_crouching": self.is_crouching,
             "is_sprinting": self.is_sprinting,

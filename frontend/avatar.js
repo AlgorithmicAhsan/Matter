@@ -40,7 +40,9 @@ class AvatarRenderer {
         this.locomotionState = 'idle';
         this._animClock      = 0;
         this._lastTime       = performance.now();
-
+        this._landmarkTimestamp = 0;
+        this._smoothLm = null;
+        
         this.boneMap = {
             leftArm:      'mixamorigLeftArm',
             rightArm:     'mixamorigRightArm',
@@ -185,20 +187,37 @@ class AvatarRenderer {
         if (!this.model || !landmarks || landmarks.length < 29) return;
         if (!Object.keys(this.bones).length) return;
 
-        const j = landmarks;
-        const v = (lm, ys = 1) => new THREE.Vector3(1 - lm.x, -lm.y * ys, lm.z * 0.5);
+        this._landmarkTimestamp = performance.now();
 
+        const alpha = 0.35;
+        if (!this._smoothLm) {
+            this._smoothLm = landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
+        } else {
+            for (let i = 0; i < landmarks.length; i++) {
+                this._smoothLm[i].x += alpha * (landmarks[i].x - this._smoothLm[i].x);
+                this._smoothLm[i].y += alpha * (landmarks[i].y - this._smoothLm[i].y);
+                this._smoothLm[i].z += alpha * (landmarks[i].z - this._smoothLm[i].z);
+            }
+        }
+
+        const j = this._smoothLm;
+        const v = (lm) => new THREE.Vector3(lm.x - 1, -lm.y, -lm.z * 0.5);
+
+        // Arms
         this._aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
         this._aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
         this._aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
         this._aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
-        this._aimBone(this.boneMap.leftUpLeg,    v(j[23], 1.5), v(j[25], 1.5));
-        this._aimBone(this.boneMap.leftLeg,      v(j[25], 1.5), v(j[27], 1.5));
-        this._aimBone(this.boneMap.rightUpLeg,   v(j[24], 1.5), v(j[26], 1.5));
-        this._aimBone(this.boneMap.rightLeg,     v(j[26], 1.5), v(j[28], 1.5));
 
-        const hipMid = v(j[23]).add(v(j[24])).multiplyScalar(0.5);
-        const shdMid = v(j[11]).add(v(j[12])).multiplyScalar(0.5);
+        // Legs
+        this._aimBone(this.boneMap.leftUpLeg,  v(j[23]), v(j[25]));
+        this._aimBone(this.boneMap.leftLeg,    v(j[25]), v(j[27]));
+        this._aimBone(this.boneMap.rightUpLeg, v(j[24]), v(j[26]));
+        this._aimBone(this.boneMap.rightLeg,   v(j[26]), v(j[28]));
+
+        // Spine
+        const hipMid = v(j[23]).clone().add(v(j[24])).multiplyScalar(0.5);
+        const shdMid = v(j[11]).clone().add(v(j[12])).multiplyScalar(0.5);
         this._aimBone(this.boneMap.spine, hipMid, shdMid);
     }
 
@@ -207,6 +226,7 @@ class AvatarRenderer {
         const t     = this._animClock;
         const state = this.locomotionState;
         const s     = this._legSign;
+        const hasLivePose = (performance.now() - this._landmarkTimestamp) < 150;
 
         // Blend a local Euler offset ON TOP of the bone's rest quaternion
         const blendBone = (name, ex, ey, ez, alpha = 0.3) => {
@@ -228,11 +248,13 @@ class AvatarRenderer {
             const b = Math.sin(t * 1.1) * 0.012;
             blendBone(this.boneMap.spine1, b, 0, 0, 0.04);
             
-            // Bring arms down to sides (Natural pose)
-            blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.08);
-            blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.08); 
-            blendBone(this.boneMap.leftForeArm, 0.2, 0, 0, 0.08);
-            blendBone(this.boneMap.rightForeArm, 0.2, 0, 0, 0.08);
+            // Bring arms down to sides (Natural pose) — only if no live landmark data
+            if (!hasLivePose) {
+                blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.08);
+                blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.08); 
+                blendBone(this.boneMap.leftForeArm, 0.2, 0, 0, 0.08);
+                blendBone(this.boneMap.rightForeArm, 0.2, 0, 0, 0.08);
+            }
 
             [this.boneMap.leftUpLeg, this.boneMap.rightUpLeg,
              this.boneMap.leftLeg,   this.boneMap.rightLeg,
@@ -249,58 +271,61 @@ class AvatarRenderer {
 
             const phase = Math.sin(t * freq);
 
-            // ── Legs ──
-            blendBone(this.boneMap.leftUpLeg,   s *  phase * swing, 0, 0, alpha);
-            blendBone(this.boneMap.rightUpLeg,  s * -phase * swing, 0, 0, alpha);
+            // ── Legs: procedural only when no live pose data ──
+            if (!hasLivePose) {
+                blendBone(this.boneMap.leftUpLeg,   s *  phase * swing, 0, 0, alpha);
+                blendBone(this.boneMap.rightUpLeg,  s * -phase * swing, 0, 0, alpha);
 
-            const lKnee = Math.max(0, -phase) * knee;
-            const rKnee = Math.max(0,  phase) * knee;
-            blendBone(this.boneMap.leftLeg,  lKnee, 0, 0, alpha);
-            blendBone(this.boneMap.rightLeg, rKnee, 0, 0, alpha);
+                const lKnee = Math.max(0, -phase) * knee;
+                const rKnee = Math.max(0,  phase) * knee;
+                blendBone(this.boneMap.leftLeg,  lKnee, 0, 0, alpha);
+                blendBone(this.boneMap.rightLeg, rKnee, 0, 0, alpha);
 
-            blendBone(this.boneMap.leftFoot,  -lKnee * foot, 0, 0, alpha);
-            blendBone(this.boneMap.rightFoot, -rKnee * foot, 0, 0, alpha);
+                blendBone(this.boneMap.leftFoot,  -lKnee * foot, 0, 0, alpha);
+                blendBone(this.boneMap.rightFoot, -rKnee * foot, 0, 0, alpha);
+            }
 
-            // ── Arms: Swing fore/aft ──
-            // Pulling both arms forward: negative offsets on both sides
-            // since positive Y rotation was biased backward on this rig.
-            const armDown = 1.5;
-            const lSwing = (phase * arm) - 0.25; 
-            const rSwing = (phase * arm) - 0.15; 
+            // ── Arms: Swing fore/aft — only if no live landmark data ──
+            if (!hasLivePose) {
+                // Pulling both arms forward: negative offsets on both sides
+                // since positive Y rotation was biased backward on this rig.
+                const armDown = 1.5;
+                const lSwing = (phase * arm) - 0.25; 
+                const rSwing = (phase * arm) - 0.15; 
 
-            blendBone(this.boneMap.leftArm,   0,  lSwing, armDown, 0.25);
-            blendBone(this.boneMap.rightArm,  0,  rSwing, armDown, 0.25);
-            
-            // Forearms slightly bent
-            blendBone(this.boneMap.leftForeArm,  0.3, 0, 0, 0.1);
-            blendBone(this.boneMap.rightForeArm, 0.3, 0, 0, 0.1);
+                blendBone(this.boneMap.leftArm,   0,  lSwing, armDown, 0.25);
+                blendBone(this.boneMap.rightArm,  0,  rSwing, armDown, 0.25);
+                
+                // Forearms slightly bent
+                blendBone(this.boneMap.leftForeArm,  0.3, 0, 0, 0.1);
+                blendBone(this.boneMap.rightForeArm, 0.3, 0, 0, 0.1);
+            }
 
             // Slight counter-rotation in spine
             blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
 
         } else if (state === 'crouch') {
-            blendBone(this.boneMap.spine,  0.20, 0, 0, 0.15);
-            blendBone(this.boneMap.spine1, 0.15, 0, 0, 0.15);
-
-            blendBone(this.boneMap.leftUpLeg,  0.75, 0,  0.04, 0.15);
-            blendBone(this.boneMap.rightUpLeg, 0.75, 0, -0.04, 0.15);
-
-            blendBone(this.boneMap.leftLeg,   0.80, 0, 0, 0.15);
-            blendBone(this.boneMap.rightLeg,  0.80, 0, 0, 0.15);
-
-            blendBone(this.boneMap.leftFoot,  -0.25, 0, 0, 0.15);
-            blendBone(this.boneMap.rightFoot, -0.25, 0, 0, 0.15);
-
-            blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.15);
-            blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.15);
+            blendBone(this.boneMap.spine,      0.15, 0, 0,     0.15);
+            blendBone(this.boneMap.leftUpLeg,  0.35, 0,  0.04, 0.15);
+            blendBone(this.boneMap.rightUpLeg, 0.35, 0, -0.04, 0.15);
+            blendBone(this.boneMap.leftLeg,    1.20, 0, 0,     0.15);
+            blendBone(this.boneMap.rightLeg,   1.20, 0, 0,     0.15);
+            blendBone(this.boneMap.leftFoot,  -0.50, 0, 0,     0.15);
+            blendBone(this.boneMap.rightFoot, -0.50, 0, 0,     0.15);
+            if (!hasLivePose) {
+                blendBone(this.boneMap.leftArm,  0, 0, 1.5, 0.15);
+                blendBone(this.boneMap.rightArm, 0, 0, 1.5, 0.15);
+            }
 
         } else if (state === 'jump') {
-            blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
-            blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
-            blendBone(this.boneMap.leftUpLeg,  -0.4, 0, 0, 0.25);
-            blendBone(this.boneMap.rightUpLeg, -0.4, 0, 0, 0.25);
-            blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
-            blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
+            if (!hasLivePose) {
+                blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
+                blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
+                blendBone(this.boneMap.leftUpLeg,  -0.4, 0, 0, 0.25);
+                blendBone(this.boneMap.rightUpLeg, -0.4, 0, 0, 0.25);
+                blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
+                blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
+            }
         }
     }
 
@@ -315,7 +340,7 @@ class AvatarRenderer {
         const localDir = dir.clone().applyQuaternion(parentQ.invert());
         bone.quaternion.slerp(
             new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), localDir),
-            0.25
+            0.35
         );
     }
 

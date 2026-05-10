@@ -150,6 +150,44 @@
             border-radius: 4px;
         }
 
+        /* ── Pose Mode button ── */
+        #pose-mode-btn {
+            background: rgba(0,212,255,.1);
+            color: var(--cyan);
+            border: 1px solid rgba(0,212,255,.3);
+            padding: 8px 18px;
+        }
+        #pose-mode-btn.active {
+            background: rgba(0,255,136,.15);
+            color: var(--green);
+            border-color: var(--green);
+            box-shadow: 0 0 10px rgba(0,255,136,.3);
+        }
+        /* ── Calibration bar ── */
+        #calib-bar-wrap {
+            display: none;
+            margin-top: 8px;
+        }
+        #calib-label {
+            font-size: 10px;
+            color: var(--muted);
+            margin-bottom: 4px;
+            font-family: var(--mono);
+        }
+        #calib-bar-track {
+            height: 6px;
+            background: rgba(255,255,255,.05);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        #calib-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--cyan);
+            border-radius: 3px;
+            transition: width .3s;
+        }
+
         /* ── WASD Keyboard HUD ── */
         #keyboard-hud {
             position: absolute;
@@ -237,6 +275,40 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         #loading-pct { font-family: var(--mono); color: var(--cyan); font-size: 14px; }
 
+        /* ── Countdown overlay ── */
+        #countdown-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(7,7,15,.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 99;
+            gap: 20px;
+        }
+        #countdown-overlay.show { display: flex; }
+        #countdown-number {
+            font-family: var(--mono);
+            font-size: 120px;
+            font-weight: 700;
+            color: var(--cyan);
+            line-height: 1;
+            text-shadow: 0 0 30px rgba(0,212,255,.6);
+            animation: pulse-countdown .3s ease-out;
+        }
+        #countdown-label {
+            font-size: 16px;
+            color: var(--text);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        @keyframes pulse-countdown {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
         /* ── Control bar ── */
         #control-bar {
             background: var(--panel);
@@ -298,6 +370,12 @@
                 <div style="color:var(--muted);font-size:12px;">Loading avatar…</div>
             </div>
 
+            <!-- Countdown overlay -->
+            <div id="countdown-overlay">
+                <div id="countdown-number">5</div>
+                <div id="countdown-label">Get ready…</div>
+            </div>
+
             <!-- WASD keyboard HUD -->
             <div id="keyboard-hud">
                 <div class="key-row">
@@ -341,6 +419,17 @@
             </div>
 
             <div>
+                <div class="section-title">Pose Control</div>
+                <button id="pose-mode-btn">🎥 Pose OFF</button>
+                <div id="calib-bar-wrap">
+                    <div id="calib-label">Stand still — calibrating 0%</div>
+                    <div id="calib-bar-track">
+                        <div id="calib-bar-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
                 <div class="section-title">Frame Data</div>
                 <div class="stat-row"><span class="stat-label">Frame</span><span class="stat-value" id="frame-count">0</span></div>
                 <div class="stat-row"><span class="stat-label">BVH Frames</span><span class="stat-value" id="bvh-frames">0</span></div>
@@ -379,6 +468,7 @@
             <button id="start-btn">▶ Start Rec</button>
             <button id="stop-btn" disabled>⏹ Stop</button>
             <button id="save-btn" disabled>💾 Save BVH</button>
+            <button id="recalib-btn" title="Reset pose calibration">↺ Recalibrate</button>
         </div>
         <div class="status-info">
             <div class="status-item">
@@ -421,6 +511,7 @@ class PosiSimApp {
         // Action system
         this.actionCtrl  = new ActionController(new ActionConfig());
         this.keyboardCtrl = null;   // created after avatar is ready
+        this.poseModeCtrl = null;   // created after WS connects
         this.keyHUD      = new KeyboardHUD();
 
         // Speed estimation
@@ -466,6 +557,14 @@ class PosiSimApp {
                 });
             }
 
+            this.poseModeCtrl = new PoseModeController((msg) => {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN)
+                    this.ws.send(JSON.stringify(msg));
+            });
+
+            document.getElementById('recalib-btn').onclick = () =>
+                this.poseModeCtrl && this.poseModeCtrl.resetCalibration();
+
             this.ui = new UncertaintyUI();
         };
 
@@ -499,10 +598,40 @@ class PosiSimApp {
 
         if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
-        // Camera pose detection DISABLED — avatar driven by keyboard only
-        // if (this.avatar && data.landmarks) {
-        //     this.avatar.updatePose(data.landmarks);
-        // }
+        // Only drive arms from landmarks when pose mode is active
+        if (this.avatar && data.landmarks && data.pose_mode) {
+            this.avatar.updatePose(data.landmarks);
+        }
+
+        // Sync pose mode flag so keyboard is blocked when pose is active
+        this.actionCtrl.poseMode = data.pose_mode ?? false;
+
+        // Pose transform: rotation delta, X mirroring, walking
+        if (data.pose_mode && data.pose_transform) {
+            console.log('pose_transform:', data.pose_transform);
+            this.actionCtrl.applyPoseTransform(data.pose_transform);
+        }
+
+        // Discrete actions (CROUCH / JUMP) still come through active_actions
+        if (data.pose_mode && data.avatar && data.avatar.active_actions) {
+            const DISCRETE = new Set(['crouch', 'jump']);
+            for (const action of DISCRETE) {
+                if (data.avatar.active_actions.includes(action)) {
+                    this.actionCtrl.activate(action);
+                } else {
+                    this.actionCtrl.deactivate(action);
+                }
+            }
+        }
+
+        // Update calibration bar
+        if (this.poseModeCtrl) {
+            this.poseModeCtrl.onFrame(
+                data.pose_mode     ?? false,
+                data.calibrated    ?? false,
+                data.calib_progress ?? 0
+            );
+        }
 
         // Hide loading overlay once first frame arrives
         const overlay = document.getElementById('loading-overlay');
@@ -519,6 +648,12 @@ class PosiSimApp {
             case 'bvh_saved':
                 document.getElementById('save-btn').disabled = true;
                 alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
+                break;
+            case 'pose_mode_changed':
+                console.log('Pose mode:', data.pose_mode);
+                break;
+            case 'calibration_reset':
+                console.log('Calibration reset.');
                 break;
         }
     }
@@ -574,7 +709,10 @@ class PosiSimApp {
 
     // ── Recording controls ────────────────────────────────────────────────────
     _startRecording() {
-        this.ws.send(JSON.stringify({ action: 'start_recording' }));
+        this._showCountdown('Recording starts in…');
+        setTimeout(() => {
+            this.ws.send(JSON.stringify({ action: 'start_recording' }));
+        }, 5000);
     }
     _stopRecording() {
         this.ws.send(JSON.stringify({ action: 'stop_recording' }));
@@ -585,6 +723,29 @@ class PosiSimApp {
     }
     _saveBVH() {
         this.ws.send(JSON.stringify({ action: 'save_bvh' }));
+    }
+
+    // ── Countdown overlay ────────────────────────────────────────────────────
+    _showCountdown(label = 'Get ready…') {
+        const overlay = document.getElementById('countdown-overlay');
+        const numEl = document.getElementById('countdown-number');
+        const labelEl = document.getElementById('countdown-label');
+        
+        overlay.classList.add('show');
+        labelEl.textContent = label;
+        
+        let count = 5;
+        numEl.textContent = count;
+        
+        const interval = setInterval(() => {
+            count -= 1;
+            if (count < 0) {
+                clearInterval(interval);
+                overlay.classList.remove('show');
+            } else {
+                numEl.textContent = count;
+            }
+        }, 1000);
     }
 
     // ── Status helpers ────────────────────────────────────────────────────────
@@ -604,7 +765,9 @@ class PosiSimApp {
     }
 }
 
-window.addEventListener('load', () => new PosiSimApp());
+window.addEventListener('load', () => {
+    window.posiSimApp = new PosiSimApp();
+});
 </script>
 </body>
 </html>
