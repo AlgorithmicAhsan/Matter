@@ -227,24 +227,29 @@ class AvatarRenderer {
         if (state === 'idle') {
             const b = Math.sin(t * 1.1) * 0.012;
             blendBone(this.boneMap.spine1, b, 0, 0, 0.04);
+            
+            // Bring arms down to sides (Natural pose)
+            blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.08);
+            blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.08); 
+            blendBone(this.boneMap.leftForeArm, 0.2, 0, 0, 0.08);
+            blendBone(this.boneMap.rightForeArm, 0.2, 0, 0, 0.08);
+
             [this.boneMap.leftUpLeg, this.boneMap.rightUpLeg,
              this.boneMap.leftLeg,   this.boneMap.rightLeg,
              this.boneMap.leftFoot,  this.boneMap.rightFoot,
-             this.boneMap.leftArm,   this.boneMap.rightArm,
-             this.boneMap.leftForeArm, this.boneMap.rightForeArm,
              this.boneMap.spine].forEach(n => returnToRest(n));
 
         } else if (state === 'walk' || state === 'run') {
             const freq  = state === 'run' ? 4.0 : 2.5;
-            const swing = state === 'run' ? 0.55 : 0.32;
+            const swing = state === 'run' ? 0.65 : 0.4;
             const knee  = state === 'run' ? 0.70 : 0.40;
             const foot  = state === 'run' ? 0.30 : 0.15;
-            const arm   = state === 'run' ? 0.55 : 0.32;
+            const arm   = state === 'run' ? 0.6 : 0.35;
             const alpha = 0.4;
 
             const phase = Math.sin(t * freq);
 
-            // ── Legs (X-axis = fore/aft in Mixamo) ──
+            // ── Legs ──
             blendBone(this.boneMap.leftUpLeg,   s *  phase * swing, 0, 0, alpha);
             blendBone(this.boneMap.rightUpLeg,  s * -phase * swing, 0, 0, alpha);
 
@@ -256,41 +261,42 @@ class AvatarRenderer {
             blendBone(this.boneMap.leftFoot,  -lKnee * foot, 0, 0, alpha);
             blendBone(this.boneMap.rightFoot, -rKnee * foot, 0, 0, alpha);
 
-            // ── Arms: swing on Z-axis (fore/aft for Mixamo lateral T-pose arms) ──
-            // Opposite phase to legs, arms hang naturally and swing like a human
-            blendBone(this.boneMap.leftArm,  0, 0,  phase * arm,  0.25);
-            blendBone(this.boneMap.rightArm, 0, 0, -phase * arm,  0.25);
-            // Slight forearm bend stays natural
-            blendBone(this.boneMap.leftForeArm,  0.15, 0, 0, 0.1);
-            blendBone(this.boneMap.rightForeArm, 0.15, 0, 0, 0.1);
+            // ── Arms: Swing fore/aft ──
+            // Pulling both arms forward: negative offsets on both sides
+            // since positive Y rotation was biased backward on this rig.
+            const armDown = 1.5;
+            const lSwing = (phase * arm) - 0.25; 
+            const rSwing = (phase * arm) - 0.15; 
+
+            blendBone(this.boneMap.leftArm,   0,  lSwing, armDown, 0.25);
+            blendBone(this.boneMap.rightArm,  0,  rSwing, armDown, 0.25);
+            
+            // Forearms slightly bent
+            blendBone(this.boneMap.leftForeArm,  0.3, 0, 0, 0.1);
+            blendBone(this.boneMap.rightForeArm, 0.3, 0, 0, 0.1);
 
             // Slight counter-rotation in spine
             blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
 
         } else if (state === 'crouch') {
-            // Spine leans forward
             blendBone(this.boneMap.spine,  0.20, 0, 0, 0.15);
             blendBone(this.boneMap.spine1, 0.15, 0, 0, 0.15);
 
-            // Upper legs rotate FORWARD (positive X = forward, same as walk)
             blendBone(this.boneMap.leftUpLeg,  0.75, 0,  0.04, 0.15);
             blendBone(this.boneMap.rightUpLeg, 0.75, 0, -0.04, 0.15);
 
-            // Knee BENDS (positive X = bend, confirmed from walk anim)
             blendBone(this.boneMap.leftLeg,   0.80, 0, 0, 0.15);
             blendBone(this.boneMap.rightLeg,  0.80, 0, 0, 0.15);
 
-            // Ankles compensate to keep feet flat
             blendBone(this.boneMap.leftFoot,  -0.25, 0, 0, 0.15);
             blendBone(this.boneMap.rightFoot, -0.25, 0, 0, 0.15);
 
-            // Arms relax slightly downward during crouch (Z rotation brings them in)
-            blendBone(this.boneMap.leftArm,  0, 0,  0.2, 0.1);
-            blendBone(this.boneMap.rightArm, 0, 0, -0.2, 0.1);
+            blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.15);
+            blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.15);
 
         } else if (state === 'jump') {
-            blendBone(this.boneMap.leftArm,    0, 0, -0.5, 0.25);
-            blendBone(this.boneMap.rightArm,   0, 0,  0.5, 0.25);
+            blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
+            blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
             blendBone(this.boneMap.leftUpLeg,  -0.4, 0, 0, 0.25);
             blendBone(this.boneMap.rightUpLeg, -0.4, 0, 0, 0.25);
             blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
