@@ -2,19 +2,19 @@ import asyncio
 import cv2
 import json
 import os
-import threading
 import time
 from pathlib import Path
 
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from pose import PoseExtractor
 from uncertainty import UncertaintyScorer
 from bvh_writer import BVHWriter
+from actions import ActionController, ActionConfig, KeyboardController
 
 # ── App Setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(title="PosiSim - Markerless Motion Capture")
@@ -45,9 +45,13 @@ class SessionState:
         self.cap = None
         self.recording = False
         self.running = False
-        self.source = CAMERA_SOURCE         # Use the config variable here
+        self.source = CAMERA_SOURCE
         self.last_landmarks = None
         self.frame_count = 0
+        # Action / movement system
+        self.action_ctrl = ActionController(ActionConfig())
+        self.keyboard_ctrl = KeyboardController(self.action_ctrl)
+        self._last_update_time = time.time()
 
 state = SessionState()
 
@@ -116,6 +120,14 @@ async def websocket_endpoint(websocket: WebSocket):
             state.last_landmarks = landmarks
             state.frame_count += 1
 
+            # Tick action controller (keeps backend position in sync with keys)
+            now = time.time()
+            dt = min(now - state._last_update_time, 0.05)
+            state._last_update_time = now
+            velocity, rotation_delta = state.action_ctrl.update(dt)
+            state.action_ctrl.position += velocity * dt
+            state.action_ctrl.rotation += rotation_delta
+
             # Encode annotated frame for preview
             _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
             import base64
@@ -126,10 +138,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 state.writer.add_frame(landmarks, trusted=uncertainty_result["trusted"])
 
             # Build payload to send to frontend
+            avatar_state = state.action_ctrl.get_state_dict()
             payload = {
                 "frame": state.frame_count,
                 "recording": state.recording,
-                "image": frame_base64,       # New: annotated video frame
+                "image": frame_base64,
                 "bvh_frames": len(state.writer.frames),
                 "bvh_skipped": state.writer.skipped,
                 "uncertainty": {
@@ -138,7 +151,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "total": uncertainty_result["total"],
                     "trusted": uncertainty_result["trusted"]
                 },
-                "landmarks": landmarks if landmarks else None
+                "landmarks": landmarks if landmarks else None,
+                "avatar": avatar_state,   # world position + active actions
             }
 
             if state.frame_count % 100 == 0:
@@ -163,7 +177,8 @@ async def websocket_endpoint(websocket: WebSocket):
 async def handle_command(command: dict, websocket: WebSocket):
     """
     Handle commands sent from the frontend.
-    Commands: start_recording, stop_recording, save_bvh, set_source
+    Commands: start_recording, stop_recording, save_bvh, set_source,
+              key_down, key_up
     """
     action = command.get("action")
 
@@ -199,13 +214,21 @@ async def handle_command(command: dict, websocket: WebSocket):
         }))
 
     elif action == "set_source":
-        # Switch between webcam and video file
         source = command.get("source", 0)
         state.source = source
         if state.cap:
             state.cap.release()
         state.cap = cv2.VideoCapture(state.source)
         print(f"Source set to: {state.source}")
+
+    elif action == "key_down":
+        # Forward browser key press to Python action controller
+        key = command.get("key", "")
+        state.keyboard_ctrl.key_down(key)
+
+    elif action == "key_up":
+        key = command.get("key", "")
+        state.keyboard_ctrl.key_up(key)
 
     elif action == "get_coverage":
         stats = state.scorer.coverage_stats()

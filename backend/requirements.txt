@@ -14,6 +14,8 @@ websockets>=11.0             # WebSocket server for live data streaming
 # Numerical Computing
 numpy>=1.21.0                # NumPy - mathematical operations, arrays
 
+pygame 
+
 # HTTP & Form Handling
 python-multipart>=0.0.5      # Multipart form data handling for FastAPI
 

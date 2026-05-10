@@ -3,52 +3,49 @@ class AvatarRenderer {
         this.container = document.getElementById(containerId);
 
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0xffffff);
+        this.scene.background = new THREE.Color(0x1a1a2e);
 
-        // Camera
         this.camera = new THREE.PerspectiveCamera(
-            60,
+            50,
             this.container.clientWidth / this.container.clientHeight,
-            0.1,
-            1000
+            0.1, 2000
         );
-        this.camera.position.set(0, 200, 250);
-        this.camera.lookAt(0, 100, 0);
+        this.camera.position.set(0, 160, 320);
+        this.camera.lookAt(0, 80, 0);
 
-        // Renderer
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.shadowMap.enabled = true;
+        this.renderer.outputEncoding = THREE.sRGBEncoding; // critical for GLTF materials
+        this.renderer.toneMapping = THREE.NoToneMapping;
         this.container.appendChild(this.renderer.domElement);
 
-        // Lighting
-        this.setupLighting();
+        this._setupLighting();
+        this._buildEnvironment();
 
-        // Grid floor
-        const grid = new THREE.GridHelper(500, 20, 0xcccccc, 0xdddddd);
-        this.scene.add(grid);
-
-        // Controls
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.target.set(0, 100, 0);
+        this.controls.target.set(0, 80, 0);
         this.controls.update();
 
-        // Avatar state
-        this.model = null;
-        this.bones = {};
-        this.lastValidPose = null;
+        this.model       = null;
+        this.bones       = {};
+        this.restPose    = {};
+        this._modelYOffset = 0; // FIX: store load-time Y offset separately
 
-        // MediaPipe landmark index -> Mixamo bone name (mixamorig prefix)
+        this.worldPosition   = new THREE.Vector3();
+        this.worldRotation   = 0;
+        this.locomotionState = 'idle';
+        this._animClock      = 0;
+        this._lastTime       = performance.now();
+
         this.boneMap = {
             leftArm:      'mixamorigLeftArm',
             rightArm:     'mixamorigRightArm',
             leftForeArm:  'mixamorigLeftForeArm',
             rightForeArm: 'mixamorigRightForeArm',
-            leftHand:     'mixamorigLeftHand',
-            rightHand:    'mixamorigRightHand',
             leftUpLeg:    'mixamorigLeftUpLeg',
             rightUpLeg:   'mixamorigRightUpLeg',
             leftLeg:      'mixamorigLeftLeg',
@@ -56,186 +53,279 @@ class AvatarRenderer {
             leftFoot:     'mixamorigLeftFoot',
             rightFoot:    'mixamorigRightFoot',
             spine:        'mixamorigSpine',
+            spine1:       'mixamorigSpine1',
+            spine2:       'mixamorigSpine2',
             hips:         'mixamorigHips',
         };
 
-        this.loadModel();
-        this.animate();
-        window.addEventListener('resize', () => this.onWindowResize());
+        // Leg swing sign — +1 or -1, auto-detected after model loads
+        // (some Mixamo exports have inverted local X for leg bones)
+        this._legSign = 1;
+
+        this._loadModel();
+        this._animate();
+        window.addEventListener('resize', () => this._onWindowResize());
     }
 
-    setupLighting() {
-        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-        this.scene.add(ambient);
+    _setupLighting() {
+        // Very bright ambient — GLTF PBR needs this
+        this.scene.add(new THREE.AmbientLight(0xffffff, 4.0));
 
-        const dirLight = new THREE.DirectionalLight(0x00d4ff, 1.0);
-        dirLight.position.set(5, 10, 7);
-        dirLight.castShadow = true;
-        this.scene.add(dirLight);
+        const key = new THREE.DirectionalLight(0xffffff, 5.0);
+        key.position.set(3, 10, 6);
+        key.castShadow = true;
+        key.shadow.mapSize.setScalar(1024);
+        key.shadow.camera.near = 1;
+        key.shadow.camera.far  = 600;
+        key.shadow.camera.left = key.shadow.camera.bottom = -200;
+        key.shadow.camera.right = key.shadow.camera.top   =  200;
+        this.scene.add(key);
 
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
-        fillLight.position.set(-5, 5, -5);
-        this.scene.add(fillLight);
+        const fill = new THREE.DirectionalLight(0xffeedd, 3.0);
+        fill.position.set(-4, 6, -4);
+        this.scene.add(fill);
+
+        const top = new THREE.DirectionalLight(0xffffff, 2.0);
+        top.position.set(0, 20, 0);
+        this.scene.add(top);
     }
 
-    loadModel() {
+    _buildEnvironment() {
+        const grid = new THREE.GridHelper(1000, 40, 0x334477, 0x223366);
+        this.scene.add(grid);
+
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(1000, 1000),
+            new THREE.MeshLambertMaterial({ color: 0x111133 })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        this.scene.add(floor);
+    }
+
+    _loadModel() {
         const loader = new THREE.GLTFLoader();
         loader.load('/models/avatar.glb', (gltf) => {
             this.model = gltf.scene;
+            this.model.rotation.y = Math.PI; // face camera
 
-            // Fix orientation — some converters export lying down
-            this.model.rotation.x = 0;
-            this.model.rotation.y = Math.PI;  // face toward camera
-            this.model.rotation.z = 0;
-
-            // Auto scale and center
-            const box = new THREE.Box3().setFromObject(this.model);
-            const size = box.getSize(new THREE.Vector3());
-            const center = box.getCenter(new THREE.Vector3());
-
+            // Scale to ~150 units
+            const box1  = new THREE.Box3().setFromObject(this.model);
+            const size  = box1.getSize(new THREE.Vector3());
             const scale = 150 / size.y;
             this.model.scale.setScalar(scale);
 
-            // Recompute box after scale
-            const box2 = new THREE.Box3().setFromObject(this.model);
-            this.model.position.x = -center.x * scale;
-            this.model.position.y = -box2.min.y;
-            this.model.position.z = -center.z * scale;
+            // Centre + ground the feet
+            const box2   = new THREE.Box3().setFromObject(this.model);
+            const centre = box2.getCenter(new THREE.Vector3());
+            this.model.position.x = -centre.x;
+            this.model.position.z = -centre.z;
 
-            // Enable skinning on existing materials and collect bones
+            // FIX: store Y offset — setWorldTransform will ADD this, not override it
+            this._modelYOffset    = -box2.min.y;
+            this.model.position.y = this._modelYOffset;
+
             this.model.traverse((child) => {
                 if (child.isMesh || child.isSkinnedMesh) {
-                    if (Array.isArray(child.material)) {
-                        child.material.forEach(m => { m.skinning = true; });
-                    } else {
-                        child.material.skinning = true;
+                    child.castShadow    = true;
+                    child.receiveShadow = true;
+                    // FIX: override bounding sphere so model never disappears on zoom-out
+                    if (child.geometry) {
+                        child.geometry.boundingSphere = new THREE.Sphere(
+                            new THREE.Vector3(0, 75, 0), 300
+                        );
                     }
-                    child.castShadow = true;
+                    child.frustumCulled = false;
                 }
-                // Collect bones
-                if (child.isBone) {
-                    this.bones[child.name] = child;
-                }
+                if (child.isBone) this.bones[child.name] = child;
             });
 
             this.scene.add(this.model);
-            this.captureInitialPose();
 
-            console.log('Avatar loaded. Bones found:', Object.keys(this.bones).length);
-            console.log('Available bones:', Object.keys(this.bones));
-        }, (progress) => {
-            if (progress.total > 0) {
-                console.log('Loading:', Math.round(progress.loaded / progress.total * 100) + '%');
+            // Capture rest pose AFTER model is in scene
+            Object.keys(this.bones).forEach(n => {
+                this.restPose[n] = this.bones[n].quaternion.clone();
+            });
+
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.style.display = 'none';
+
+            console.log('Avatar loaded. Bones:', Object.keys(this.bones).length);
+        },
+        (p) => {
+            if (p.total > 0) {
+                const el = document.getElementById('loading-pct');
+                if (el) el.textContent = Math.round(p.loaded / p.total * 100) + '%';
             }
-        }, (error) => {
-            console.error('Error loading avatar:', error);
-        });
+        },
+        (e) => console.error('Avatar error:', e));
     }
 
-    captureInitialPose() {
-        this.lastValidPose = {};
-        Object.keys(this.bones).forEach(name => {
-            this.lastValidPose[name] = {
-                quaternion: this.bones[name].quaternion.clone()
-            };
-        });
+    // Called every frame by ActionController
+    setWorldTransform(position, rotationRad, locomotionState) {
+        this.worldPosition.copy(position);
+        this.worldRotation   = rotationRad;
+        this.locomotionState = locomotionState || 'idle';
+
+        if (this.model) {
+            this.model.position.x = position.x;
+            // FIX: always ADD the load-time Y offset on top of world Y
+            this.model.position.y = position.y + this._modelYOffset;
+            this.model.position.z = position.z;
+            this.model.rotation.y = Math.PI + rotationRad;
+        }
+
+        this.controls.target.lerp(
+            new THREE.Vector3(position.x, position.y + 80, position.z), 0.1
+        );
     }
 
+    // Called when MediaPipe landmarks arrive
     updatePose(landmarks) {
         if (!this.model || !landmarks || landmarks.length < 29) return;
-        if (Object.keys(this.bones).length === 0) return;
+        if (!Object.keys(this.bones).length) return;
 
         const j = landmarks;
+        const v = (lm, ys = 1) => new THREE.Vector3(1 - lm.x, -lm.y * ys, lm.z * 0.5);
 
-        // Helper — proper 3D conversion
-        // X: mirrored, Y: flipped, Z: depth kept positive
-        const v = (lm, yScale = 1.0) => new THREE.Vector3(
-            1 - lm.x,
-            -lm.y * yScale,
-            lm.z * 0.5         // don't negate Z
-        );
+        this._aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
+        this._aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
+        this._aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
+        this._aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
+        this._aimBone(this.boneMap.leftUpLeg,    v(j[23], 1.5), v(j[25], 1.5));
+        this._aimBone(this.boneMap.leftLeg,      v(j[25], 1.5), v(j[27], 1.5));
+        this._aimBone(this.boneMap.rightUpLeg,   v(j[24], 1.5), v(j[26], 1.5));
+        this._aimBone(this.boneMap.rightLeg,     v(j[26], 1.5), v(j[28], 1.5));
 
-        // Arms
-        this.aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
-        this.aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
-        this.aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
-        this.aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
-
-        // Legs — higher Y scale
-        this.aimBone(this.boneMap.leftUpLeg,  v(j[23], 1.5), v(j[25], 1.5));
-        this.aimBone(this.boneMap.leftLeg,    v(j[25], 1.5), v(j[27], 1.5));
-        this.aimBone(this.boneMap.rightUpLeg, v(j[24], 1.5), v(j[26], 1.5));
-        this.aimBone(this.boneMap.rightLeg,   v(j[26], 1.5), v(j[28], 1.5));
-        // Spine
-        const hipV = v(j[23]).add(v(j[24])).multiplyScalar(0.5);
-        const shdV = v(j[11]).add(v(j[12])).multiplyScalar(0.5);
-        this.aimBone(this.boneMap.spine, hipV, shdV);
-
-        // Hips rotation — rotate avatar body as you rotate
-        const leftHip  = v(j[23]);
-        const rightHip = v(j[24]);
-        const hipDir   = new THREE.Vector3().subVectors(rightHip, leftHip).normalize();
-        const targetHipAngle = Math.atan2(hipDir.z, hipDir.x);
-        if (this.bones[this.boneMap.hips]) {
-            const hipQuat = new THREE.Quaternion();
-            hipQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetHipAngle);
-            this.bones[this.boneMap.hips].quaternion.slerp(hipQuat, 0.2);
-        }
-
-        this.lastValidPose = this.capturePose();
+        const hipMid = v(j[23]).add(v(j[24])).multiplyScalar(0.5);
+        const shdMid = v(j[11]).add(v(j[12])).multiplyScalar(0.5);
+        this._aimBone(this.boneMap.spine, hipMid, shdMid);
     }
 
-    aimBone(boneName, fromVec, toVec) {
+    _applyLocomotionAnim(dt) {
+        this._animClock += dt;
+        const t     = this._animClock;
+        const state = this.locomotionState;
+        const s     = this._legSign;
+
+        // Blend a local Euler offset ON TOP of the bone's rest quaternion
+        const blendBone = (name, ex, ey, ez, alpha = 0.3) => {
+            const bone = this.bones[name];
+            const rest = this.restPose[name];
+            if (!bone || !rest) return;
+            const offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(ex, ey, ez));
+            bone.quaternion.slerp(rest.clone().multiply(offset), alpha);
+        };
+
+        const returnToRest = (name, alpha = 0.06) => {
+            const bone = this.bones[name];
+            const rest = this.restPose[name];
+            if (!bone || !rest) return;
+            bone.quaternion.slerp(rest, alpha);
+        };
+
+        if (state === 'idle') {
+            const b = Math.sin(t * 1.1) * 0.012;
+            blendBone(this.boneMap.spine1, b, 0, 0, 0.04);
+            [this.boneMap.leftUpLeg, this.boneMap.rightUpLeg,
+             this.boneMap.leftLeg,   this.boneMap.rightLeg,
+             this.boneMap.leftFoot,  this.boneMap.rightFoot,
+             this.boneMap.leftArm,   this.boneMap.rightArm,
+             this.boneMap.leftForeArm, this.boneMap.rightForeArm,
+             this.boneMap.spine].forEach(n => returnToRest(n));
+
+        } else if (state === 'walk' || state === 'run') {
+            const freq  = state === 'run' ? 4.0 : 2.5;
+            const swing = state === 'run' ? 0.55 : 0.32;
+            const knee  = state === 'run' ? 0.70 : 0.40;
+            const foot  = state === 'run' ? 0.30 : 0.15;
+            const arm   = state === 'run' ? 0.55 : 0.32;
+            const alpha = 0.4;
+
+            const phase = Math.sin(t * freq);
+
+            // ── Legs (X-axis = fore/aft in Mixamo) ──
+            blendBone(this.boneMap.leftUpLeg,   s *  phase * swing, 0, 0, alpha);
+            blendBone(this.boneMap.rightUpLeg,  s * -phase * swing, 0, 0, alpha);
+
+            const lKnee = Math.max(0, -phase) * knee;
+            const rKnee = Math.max(0,  phase) * knee;
+            blendBone(this.boneMap.leftLeg,  lKnee, 0, 0, alpha);
+            blendBone(this.boneMap.rightLeg, rKnee, 0, 0, alpha);
+
+            blendBone(this.boneMap.leftFoot,  -lKnee * foot, 0, 0, alpha);
+            blendBone(this.boneMap.rightFoot, -rKnee * foot, 0, 0, alpha);
+
+            // ── Arms: swing on Z-axis (fore/aft for Mixamo lateral T-pose arms) ──
+            // Opposite phase to legs, arms hang naturally and swing like a human
+            blendBone(this.boneMap.leftArm,  0, 0,  phase * arm,  0.25);
+            blendBone(this.boneMap.rightArm, 0, 0, -phase * arm,  0.25);
+            // Slight forearm bend stays natural
+            blendBone(this.boneMap.leftForeArm,  0.15, 0, 0, 0.1);
+            blendBone(this.boneMap.rightForeArm, 0.15, 0, 0, 0.1);
+
+            // Slight counter-rotation in spine
+            blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
+
+        } else if (state === 'crouch') {
+            // Spine leans forward
+            blendBone(this.boneMap.spine,  0.20, 0, 0, 0.15);
+            blendBone(this.boneMap.spine1, 0.15, 0, 0, 0.15);
+
+            // Upper legs rotate FORWARD (positive X = forward, same as walk)
+            blendBone(this.boneMap.leftUpLeg,  0.75, 0,  0.04, 0.15);
+            blendBone(this.boneMap.rightUpLeg, 0.75, 0, -0.04, 0.15);
+
+            // Knee BENDS (positive X = bend, confirmed from walk anim)
+            blendBone(this.boneMap.leftLeg,   0.80, 0, 0, 0.15);
+            blendBone(this.boneMap.rightLeg,  0.80, 0, 0, 0.15);
+
+            // Ankles compensate to keep feet flat
+            blendBone(this.boneMap.leftFoot,  -0.25, 0, 0, 0.15);
+            blendBone(this.boneMap.rightFoot, -0.25, 0, 0, 0.15);
+
+            // Arms relax slightly downward during crouch (Z rotation brings them in)
+            blendBone(this.boneMap.leftArm,  0, 0,  0.2, 0.1);
+            blendBone(this.boneMap.rightArm, 0, 0, -0.2, 0.1);
+
+        } else if (state === 'jump') {
+            blendBone(this.boneMap.leftArm,    0, 0, -0.5, 0.25);
+            blendBone(this.boneMap.rightArm,   0, 0,  0.5, 0.25);
+            blendBone(this.boneMap.leftUpLeg,  -0.4, 0, 0, 0.25);
+            blendBone(this.boneMap.rightUpLeg, -0.4, 0, 0, 0.25);
+            blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
+            blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
+        }
+    }
+
+
+    _aimBone(boneName, fromVec, toVec) {
         const bone = this.bones[boneName];
         if (!bone) return;
-
-        const targetDir = new THREE.Vector3()
-            .subVectors(toVec, fromVec)
-            .normalize();
-
-        if (targetDir.length() < 0.001) return;
-
-        const parentWorldQuat = new THREE.Quaternion();
-        if (bone.parent) {
-            bone.parent.getWorldQuaternion(parentWorldQuat);
-        }
-
-        const parentWorldQuatInv = parentWorldQuat.clone().invert();
-        const localTarget = targetDir.clone().applyQuaternion(parentWorldQuatInv);
-        const restDir = new THREE.Vector3(0, 1, 0);
-        const localQuat = new THREE.Quaternion().setFromUnitVectors(restDir, localTarget);
-
-        bone.quaternion.slerp(localQuat, 0.25);
+        const dir = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
+        if (dir.length() < 0.001) return;
+        const parentQ = new THREE.Quaternion();
+        if (bone.parent) bone.parent.getWorldQuaternion(parentQ);
+        const localDir = dir.clone().applyQuaternion(parentQ.invert());
+        bone.quaternion.slerp(
+            new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), localDir),
+            0.25
+        );
     }
 
-    capturePose() {
-        const pose = {};
-        Object.keys(this.bones).forEach(name => {
-            pose[name] = { quaternion: this.bones[name].quaternion.clone() };
-        });
-        return pose;
-    }
-
-    freezePose() {
-        if (!this.lastValidPose) return;
-        Object.keys(this.lastValidPose).forEach(name => {
-            if (this.bones[name]) {
-                this.bones[name].quaternion.copy(this.lastValidPose[name].quaternion);
-            }
-        });
-    }
-
-    animate = () => {
-        requestAnimationFrame(this.animate);
+    _animate = () => {
+        requestAnimationFrame(this._animate);
+        const now = performance.now();
+        const dt  = Math.min((now - this._lastTime) / 1000, 0.05);
+        this._lastTime = now;
+        if (this.model) this._applyLocomotionAnim(dt);
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
     }
 
-    onWindowResize() {
-        const w = this.container.clientWidth;
-        const h = this.container.clientHeight;
-        this.camera.aspect = w / h;
+    _onWindowResize() {
+        this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(w, h);
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     }
 }
