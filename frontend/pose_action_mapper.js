@@ -16,9 +16,7 @@ class PoseActionMapper {
             LEFT_SHOULDER:  11,
             RIGHT_SHOULDER: 12,
             LEFT_WRIST:     15,
-            RIGHT_WRIST:    16,
-            LEFT_HIP:       23,
-            RIGHT_HIP:      24
+            RIGHT_WRIST:    16
         };
     }
 
@@ -35,66 +33,57 @@ class PoseActionMapper {
         const rs = landmarks[this.LANDMARKS.RIGHT_SHOULDER];
         const lw = landmarks[this.LANDMARKS.LEFT_WRIST];
         const rw = landmarks[this.LANDMARKS.RIGHT_WRIST];
-        const lh = landmarks[this.LANDMARKS.LEFT_HIP];
-        const rh = landmarks[this.LANDMARKS.RIGHT_HIP];
 
         // Safety check
-        if (!ls || !rs || !lw || !rw || !lh || !rh) return;
+        if (!ls || !rs || !lw || !rw) return;
 
         // 1. Gesture Detection Logic
         // ─────────────────────────────────────────────────────────────────────
         
-        // Vertical thresholds
-        const leftHandUp    = lw.y < (ls.y - 0.12); // Wrist significantly above shoulder
+        const leftHandUp    = lw.y < (ls.y - 0.12);
         const rightHandUp   = rw.y < (rs.y - 0.12);
         const bothHandsUp   = leftHandUp && rightHandUp;
         
-        // Crouch detection: hands down near or below hip level
-        const bothHandsLow  = (lw.y > (lh.y - 0.05)) && (rw.y > (rh.y - 0.05));
+        // Crouch detection: hands down far below shoulder level (at or below hips)
+        const bothHandsLow  = (lw.y > (ls.y + 0.35)) && (rw.y > (rs.y + 0.35));
 
-        // 2. Action Mapping (Priority Logic)
+        // 2. Action Mapping (Source-based)
         // ─────────────────────────────────────────────────────────────────────
 
         // SPRINT
-        if (bothHandsUp) {
-            this.actionCtrl.activate(ActionType.SPRINT);
-        } else {
-            this.actionCtrl.deactivate(ActionType.SPRINT);
-        }
+        if (bothHandsUp) this.actionCtrl.activate(ActionType.SPRINT, 'pose');
+        else             this.actionCtrl.deactivate(ActionType.SPRINT, 'pose');
 
         // MOVEMENT (Forward / Backward)
         if (bothHandsUp || rightHandUp) {
-            // Both up OR just right up triggers forward (Both up = Sprint Forward)
-            this.actionCtrl.activate(ActionType.MOVE_FORWARD);
-            this.actionCtrl.deactivate(ActionType.MOVE_BACKWARD);
+            this.actionCtrl.activate(ActionType.MOVE_FORWARD, 'pose');
+            this.actionCtrl.deactivate(ActionType.MOVE_BACKWARD, 'pose');
         } 
         else if (leftHandUp) {
-            // Only left up triggers backward
-            this.actionCtrl.activate(ActionType.MOVE_BACKWARD);
-            this.actionCtrl.deactivate(ActionType.MOVE_FORWARD);
+            this.actionCtrl.activate(ActionType.MOVE_BACKWARD, 'pose');
+            this.actionCtrl.deactivate(ActionType.MOVE_FORWARD, 'pose');
         } 
         else {
-            // Neither raised
-            this.actionCtrl.deactivate(ActionType.MOVE_FORWARD);
-            this.actionCtrl.deactivate(ActionType.MOVE_BACKWARD);
+            this.actionCtrl.deactivate(ActionType.MOVE_FORWARD, 'pose');
+            this.actionCtrl.deactivate(ActionType.MOVE_BACKWARD, 'pose');
         }
 
         // CROUCH
-        // Only crouch if hands are low and we aren't trying to walk/run
-        if (bothHandsLow && !leftHandUp && !rightHandUp) {
-            this.actionCtrl.activate(ActionType.CROUCH);
-        } else {
-            this.actionCtrl.deactivate(ActionType.CROUCH);
-        }
+        const shouldCrouch = bothHandsLow && !leftHandUp && !rightHandUp;
+        if (shouldCrouch) this.actionCtrl.activate(ActionType.CROUCH, 'pose');
+        else              this.actionCtrl.deactivate(ActionType.CROUCH, 'pose');
     }
 
     /**
      * Resets all gesture-driven actions.
      */
     _cleanup() {
-        this.actionCtrl.deactivate(ActionType.MOVE_FORWARD);
-        this.actionCtrl.deactivate(ActionType.MOVE_BACKWARD);
-        this.actionCtrl.deactivate(ActionType.SPRINT);
-        this.actionCtrl.deactivate(ActionType.CROUCH);
+        const ACTIONS = [
+            ActionType.MOVE_FORWARD, ActionType.MOVE_BACKWARD,
+            ActionType.SPRINT, ActionType.CROUCH
+        ];
+        for (const action of ACTIONS) {
+            this.actionCtrl.deactivate(action, 'pose');
+        }
     }
 }

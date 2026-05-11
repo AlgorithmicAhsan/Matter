@@ -171,8 +171,16 @@ class AvatarRenderer {
 
         if (this.model) {
             this.model.position.x = position.x;
-            // FIX: always ADD the load-time Y offset on top of world Y
-            this.model.position.y = position.y + this._modelYOffset;
+            
+            // Apply MASSIVE vertical drop for crouching so they don't levitate
+            // The image shows the character floating very high, so we go for -150 units.
+            let crouchOffset = 0;
+            if (this.locomotionState === 'crouch') {
+                crouchOffset = -150; 
+            }
+            
+            // always ADD the load-time Y offset on top of world Y
+            this.model.position.y = position.y + this._modelYOffset + crouchOffset;
             this.model.position.z = position.z;
             this.model.rotation.y = Math.PI + rotationRad;
         }
@@ -305,19 +313,37 @@ class AvatarRenderer {
             blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
 
         } else if (state === 'crouch') {
-            blendBone(this.boneMap.spine,      0.15, 0, 0,     0.15);
-            blendBone(this.boneMap.leftUpLeg,  0.35, 0,  0.04, 0.15);
-            blendBone(this.boneMap.rightUpLeg, 0.35, 0, -0.04, 0.15);
-            blendBone(this.boneMap.leftLeg,    1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.rightLeg,   1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.leftFoot,  -0.50, 0, 0,     0.15);
-            blendBone(this.boneMap.rightFoot, -0.50, 0, 0,     0.15);
+            // Extreme squat: fold everything to the ground
+            blendBone(this.boneMap.spine,      0.60, 0, 0,     0.15);
+            blendBone(this.boneMap.spine1,     0.40, 0, 0,     0.15);
+
+            // Move the Hips bone itself down if possible (Mixamo root)
+            const hips = this.bones[this.boneMap.hips];
+            if (hips) hips.position.y = -40;
+
+            // Upper legs rotate nearly horizontal
+            blendBone(this.boneMap.leftUpLeg,  1.50, 0,  0.1,  0.15);
+            blendBone(this.boneMap.rightUpLeg, 1.50, 0, -0.1,  0.15);
+
+            // Knee BENDS (maximum fold)
+            blendBone(this.boneMap.leftLeg,    1.90, 0, 0,     0.15);
+            blendBone(this.boneMap.rightLeg,   1.90, 0, 0,     0.15);
+
+            // Ankles compensate hard
+            blendBone(this.boneMap.leftFoot,  -0.60, 0, 0,     0.15);
+            blendBone(this.boneMap.rightFoot, -0.60, 0, 0,     0.15);
+
             if (!hasLivePose) {
-                blendBone(this.boneMap.leftArm,  0, 0, 1.5, 0.15);
-                blendBone(this.boneMap.rightArm, 0, 0, 1.5, 0.15);
+                // Stabilizing arms (out for balance)
+                blendBone(this.boneMap.leftArm,  0.2, 0.4, 1.2, 0.15);
+                blendBone(this.boneMap.rightArm, 0.2, -0.4, 1.2, 0.15);
             }
 
         } else if (state === 'jump') {
+            // Reset hips if jumping
+            const hips = this.bones[this.boneMap.hips];
+            if (hips) hips.position.y = 0;
+
             if (!hasLivePose) {
                 blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
                 blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
@@ -326,6 +352,10 @@ class AvatarRenderer {
                 blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
                 blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
             }
+        } else {
+            // Idle/Default: Ensure Hips position is reset
+            const hips = this.bones[this.boneMap.hips];
+            if (hips) hips.position.y = 0;
         }
     }
 

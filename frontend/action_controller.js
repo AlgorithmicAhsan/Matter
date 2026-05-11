@@ -54,21 +54,43 @@ class ActionController {
         this.isSprinting  = false;
         this.jumpCooldown = 0;
 
-        // Active actions
-        this.active = new Set();
+        // Active actions (Split into sources to prevent conflicts)
+        this.keyboardActive = new Set();
+        this.poseActive     = new Set();
 
         // Locomotion state for animation blending: 'idle' | 'walk' | 'run' | 'crouch' | 'jump'
         this.locomotionState = 'idle';
+        this.poseMode        = false; // if true, some logic changes
 
-        this.poseMode       = false;   // when true, keyboard is ignored
-        this._poseWalkSpeed = 0;       // units/s set by pose transform
-        this._poseHipX      = undefined; // hip X position from pose
+        // Internal pose-driven offsets
+        this._poseHipX      = undefined;
+        this._poseWalkSpeed = 0;
     }
 
-    // ── Input ────────────────────────────────────────────────────────────────
-    activate(action)   { this.active.add(action); }
-    deactivate(action) { this.active.delete(action); }
-    has(action)        { return this.active.has(action); }
+    /**
+     * @param {string} action
+     * @param {string} source 'keyboard' | 'pose'
+     */
+    activate(action, source = 'keyboard') {
+        if (source === 'pose') this.poseActive.add(action);
+        else                   this.keyboardActive.add(action);
+    }
+
+    /**
+     * @param {string} action
+     * @param {string} source 'keyboard' | 'pose'
+     */
+    deactivate(action, source = 'keyboard') {
+        if (source === 'pose') this.poseActive.delete(action);
+        else                   this.keyboardActive.delete(action);
+    }
+
+    /**
+     * Returns true if the action is active from ANY source.
+     */
+    has(action) {
+        return this.keyboardActive.has(action) || this.poseActive.has(action);
+    }
 
     // ── Update ───────────────────────────────────────────────────────────────
     /**
