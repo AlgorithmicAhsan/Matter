@@ -382,10 +382,12 @@ class PoseModeController {
     _updateBtn() {
         if (!this._btn) return;
         if (this._poseMode) {
-            this._btn.textContent = this._calibrated ? '🎥 Pose ON' : '⏳ Calibrating…';
+            // When pose mode is active, show it is ON. 
+            // We can still indicate calibration status, but the primary state is "ON"
+            this._btn.textContent = this._calibrated ? '🎥 Pose Mode: ON' : '⏳ Calibrating...';
             this._btn.classList.add('active');
         } else {
-            this._btn.textContent = '🎥 Pose OFF';
+            this._btn.textContent = '🎥 Pose Mode: OFF';
             this._btn.classList.remove('active');
         }
     }

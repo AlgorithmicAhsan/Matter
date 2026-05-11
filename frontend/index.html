@@ -493,6 +493,7 @@
 <!-- App scripts -->
 <script src="/frontend/action_controller.js"></script>
 <script src="/frontend/avatar.js"></script>
+<script src="/frontend/pose_action_mapper.js"></script>
 <script src="/frontend/uncertainty_ui.js"></script>
 
 <script>
@@ -510,6 +511,7 @@ class PosiSimApp {
 
         // Action system
         this.actionCtrl  = new ActionController(new ActionConfig());
+        this.poseActionMapper = new PoseActionMapper(this.actionCtrl);
         this.keyboardCtrl = null;   // created after avatar is ready
         this.poseModeCtrl = null;   // created after WS connects
         this.keyHUD      = new KeyboardHUD();
@@ -598,31 +600,13 @@ class PosiSimApp {
 
         if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
-        // Only drive arms from landmarks when pose mode is active
-        if (this.avatar && data.landmarks && data.pose_mode) {
-            this.avatar.updatePose(data.landmarks);
+        // ── Pose Action Mapping ─────────────────────────────────────────────
+        if (this.poseActionMapper) {
+            this.poseActionMapper.update(data.landmarks, data.pose_mode);
         }
 
         // Sync pose mode flag so keyboard is blocked when pose is active
         this.actionCtrl.poseMode = data.pose_mode ?? false;
-
-        // Pose transform: rotation delta, X mirroring, walking
-        if (data.pose_mode && data.pose_transform) {
-            console.log('pose_transform:', data.pose_transform);
-            this.actionCtrl.applyPoseTransform(data.pose_transform);
-        }
-
-        // Discrete actions (CROUCH / JUMP) still come through active_actions
-        if (data.pose_mode && data.avatar && data.avatar.active_actions) {
-            const DISCRETE = new Set(['crouch', 'jump']);
-            for (const action of DISCRETE) {
-                if (data.avatar.active_actions.includes(action)) {
-                    this.actionCtrl.activate(action);
-                } else {
-                    this.actionCtrl.deactivate(action);
-                }
-            }
-        }
 
         // Update calibration bar
         if (this.poseModeCtrl) {
