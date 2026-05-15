@@ -126,7 +126,10 @@ class ActionController {
         if (!this.isGrounded) {
             this.verticalVel    += cfg.gravity * dt;
             this.position.y     += this.verticalVel * dt;
-            if (this.position.y <= cfg.groundY) {
+            
+            // Only land if we are falling downwards!
+            // (If we jump while crouched, position.y might be < 0 for a few frames)
+            if (this.verticalVel <= 0 && this.position.y <= cfg.groundY) {
                 this.position.y  = cfg.groundY;
                 this.verticalVel = 0;
                 this.isGrounded  = true;
@@ -154,6 +157,10 @@ class ActionController {
         // MUST be here — after all integration
         if (this.poseMode && this._poseHipX !== undefined) {
             this.position.x = this._poseHipX;
+            // Only drop the Y position if grounded (to avoid interfering with physics jumps)
+            if (this.isGrounded && this._poseHipY !== undefined) {
+                this.position.y = cfg.groundY + this._poseHipY;
+            }
         }
 
         return {
@@ -212,8 +219,9 @@ class ActionController {
         // Rotation: accumulate delta directly (no ambiguity, tracks exact movement)
         this.rotation += transform.rotation_delta;
 
-        // X position: store hip position to apply after world space calculation
+        // X and Y position: store hip positions to apply after world space calculation
         this._poseHipX = transform.hip_x_world;
+        this._poseHipY = transform.hip_y_world;
 
         // Walking: activate/deactivate based on anti-phase detection
         this._poseWalkSpeed = transform.is_walking ? transform.walk_speed : 0;

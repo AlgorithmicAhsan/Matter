@@ -227,11 +227,11 @@ class AvatarRenderer {
         this._aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
         this._aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
 
-        // Legs
-        this._aimBone(this.boneMap.leftUpLeg,  vLeg(j[23]), vLeg(j[25]), 0.4, true);
-        this._aimBone(this.boneMap.leftLeg,    vLeg(j[25]), vLeg(j[27]), 0.4, true);
-        this._aimBone(this.boneMap.rightUpLeg, vLeg(j[24]), vLeg(j[26]), 0.4, true);
-        this._aimBone(this.boneMap.rightLeg,   vLeg(j[26]), vLeg(j[28]), 0.4, true);
+        // Legs (heavy smoothing 0.1 to prevent depth jitter when crouching)
+        this._aimBone(this.boneMap.leftUpLeg,  vLeg(j[23]), vLeg(j[25]), 0.1, true);
+        this._aimBone(this.boneMap.leftLeg,    vLeg(j[25]), vLeg(j[27]), 0.1, true);
+        this._aimBone(this.boneMap.rightUpLeg, vLeg(j[24]), vLeg(j[26]), 0.1, true);
+        this._aimBone(this.boneMap.rightLeg,   vLeg(j[26]), vLeg(j[28]), 0.1, true);
 
         // Spine
         const hipMid = v(j[23]).clone().add(v(j[24])).multiplyScalar(0.5);
