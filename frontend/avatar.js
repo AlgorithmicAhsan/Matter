@@ -1,17 +1,23 @@
 class AvatarRenderer {
-    constructor(containerId) {
+    /**
+     * @param {string}              containerId
+     * @param {EnvironmentManager}  [envManager]  Optional environment manager;
+     *                                            if provided the active environment
+     *                                            is loaded before the avatar.
+     */
+    constructor(containerId, envManager) {
         this.container = document.getElementById(containerId);
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x1a1a2e);
 
         this.camera = new THREE.PerspectiveCamera(
-            50,
+            55,
             this.container.clientWidth / this.container.clientHeight,
-            0.1, 2000
+            0.1, 5000
         );
-        this.camera.position.set(0, 160, 320);
-        this.camera.lookAt(0, 80, 0);
+        this.camera.position.set(0, 200, -350);
+        this.camera.lookAt(0, 80, 100);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
@@ -22,12 +28,21 @@ class AvatarRenderer {
         this.container.appendChild(this.renderer.domElement);
 
         this._setupLighting();
-        this._buildEnvironment();
+
+        // If an EnvironmentManager is passed, delegate environment building to it.
+        // Otherwise fall back to the old flat floor.
+        if (envManager) {
+            envManager.scene = this.scene; // share the scene reference
+            this.envManager  = envManager;
+        } else {
+            this._buildFallbackEnvironment();
+        }
 
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.target.set(0, 80, 0);
+        this.controls.target.set(0, 80, 50);
+        this.controls.maxDistance = 2000;
         this.controls.update();
 
         this.model       = null;
@@ -42,6 +57,7 @@ class AvatarRenderer {
         this._lastTime       = performance.now();
         this._landmarkTimestamp = 0;
         this._smoothLm = null;
+        this._crouchBlend = 0;   // 0 = standing, 1 = fully crouched (smooth)
         
         this.boneMap = {
             leftArm:      'mixamorigLeftArm',
@@ -74,31 +90,29 @@ class AvatarRenderer {
         this.scene.add(new THREE.AmbientLight(0xffffff, 4.0));
 
         const key = new THREE.DirectionalLight(0xffffff, 5.0);
-        key.position.set(3, 10, 6);
+        key.position.set(300, 500, 400);
         key.castShadow = true;
-        key.shadow.mapSize.setScalar(1024);
+        key.shadow.mapSize.setScalar(2048);
         key.shadow.camera.near = 1;
-        key.shadow.camera.far  = 600;
-        key.shadow.camera.left = key.shadow.camera.bottom = -200;
-        key.shadow.camera.right = key.shadow.camera.top   =  200;
+        key.shadow.camera.far  = 3000;
+        key.shadow.camera.left = key.shadow.camera.bottom = -800;
+        key.shadow.camera.right = key.shadow.camera.top   =  800;
         this.scene.add(key);
 
         const fill = new THREE.DirectionalLight(0xffeedd, 3.0);
-        fill.position.set(-4, 6, -4);
+        fill.position.set(-400, 300, -200);
         this.scene.add(fill);
 
         const top = new THREE.DirectionalLight(0xffffff, 2.0);
-        top.position.set(0, 20, 0);
+        top.position.set(0, 1000, 500);
         this.scene.add(top);
     }
 
-    _buildEnvironment() {
-        const grid = new THREE.GridHelper(1000, 40, 0x334477, 0x223366);
-        this.scene.add(grid);
-
+    /** Minimal flat fallback used when no EnvironmentManager is provided. */
+    _buildFallbackEnvironment() {
         const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(1000, 1000),
-            new THREE.MeshLambertMaterial({ color: 0x111133 })
+            new THREE.PlaneGeometry(2000, 2000),
+            new THREE.MeshLambertMaterial({ color: 0x14182a })
         );
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
@@ -116,6 +130,8 @@ class AvatarRenderer {
             const size  = box1.getSize(new THREE.Vector3());
             const scale = 150 / size.y;
             this.model.scale.setScalar(scale);
+            // Store scale so bone animations can compute local offsets correctly
+            this._modelScale = scale;
 
             // Centre + ground the feet
             const box2   = new THREE.Box3().setFromObject(this.model);
@@ -123,7 +139,7 @@ class AvatarRenderer {
             this.model.position.x = -centre.x;
             this.model.position.z = -centre.z;
 
-            // FIX: store Y offset — setWorldTransform will ADD this, not override it
+            // store Y offset — setWorldTransform will ADD this, not override it
             this._modelYOffset    = -box2.min.y;
             this.model.position.y = this._modelYOffset;
 
@@ -171,23 +187,30 @@ class AvatarRenderer {
 
         if (this.model) {
             this.model.position.x = position.x;
-            
-            // Apply MASSIVE vertical drop for crouching so they don't levitate
-            // The image shows the character floating very high, so we go for -150 units.
-            let crouchOffset = 0;
-            if (this.locomotionState === 'crouch') {
-                crouchOffset = -150; 
-            }
-            
-            // always ADD the load-time Y offset on top of world Y
-            this.model.position.y = position.y + this._modelYOffset + crouchOffset;
+
+            // Smooth crouch blend: ramp toward 1 when crouching, back to 0 otherwise
+            const crouchTarget = this.locomotionState === 'crouch' ? 1.0 : 0.0;
+            this._crouchBlend += (crouchTarget - this._crouchBlend) * 0.18;
+            if (Math.abs(this._crouchBlend - crouchTarget) < 0.005) this._crouchBlend = crouchTarget;
+
+            // Scale-based crouch: compress Y to 65% — clean vertical drop, feet stay grounded
+            const crouchScale = 1.0 - this._crouchBlend * 0.35;
+            this.model.scale.set(this._modelScale, this._modelScale * crouchScale, this._modelScale);
+
+            // No Y-drop needed — scaling handles height. Just ground the model.
+            this.model.position.y = position.y + this._modelYOffset;
             this.model.position.z = position.z;
             this.model.rotation.y = Math.PI + rotationRad;
         }
 
-        this.controls.target.lerp(
-            new THREE.Vector3(position.x, position.y + 80, position.z), 0.1
-        );
+        // Camera follow: move both orbit target and camera by the same delta
+        // so the viewing angle stays consistent while tracking the character
+        const desiredTarget = new THREE.Vector3(position.x, position.y + 100, position.z);
+        const prevTarget    = this.controls.target.clone();
+        this.controls.target.lerp(desiredTarget, 0.12);
+        // Shift camera position by the same amount the target moved
+        const shift = this.controls.target.clone().sub(prevTarget);
+        this.camera.position.add(shift);
     }
 
     // Called when MediaPipe landmarks arrive
@@ -313,37 +336,37 @@ class AvatarRenderer {
             blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
 
         } else if (state === 'crouch') {
-            // Extreme squat: fold everything to the ground
-            blendBone(this.boneMap.spine,      0.60, 0, 0,     0.15);
-            blendBone(this.boneMap.spine1,     0.40, 0, 0,     0.15);
+            // ── Crouch pose ──────────────────────────────────────────────────
+            // Model Y offset handles the height drop (in setWorldTransform).
+            // Bones just form a low squat shape.
+            const a = 0.3;
 
-            // Move the Hips bone itself down if possible (Mixamo root)
-            const hips = this.bones[this.boneMap.hips];
-            if (hips) hips.position.y = -40;
+            // Spine: lean forward
+            blendBone(this.boneMap.spine,  0.40, 0, 0, a);
+            blendBone(this.boneMap.spine1, 0.25, 0, 0, a);
+            blendBone(this.boneMap.spine2, 0.15, 0, 0, a);
 
-            // Upper legs rotate nearly horizontal
-            blendBone(this.boneMap.leftUpLeg,  1.50, 0,  0.1,  0.15);
-            blendBone(this.boneMap.rightUpLeg, 1.50, 0, -0.1,  0.15);
+            // Thighs: moderate forward swing (~60°)
+            blendBone(this.boneMap.leftUpLeg,  1.05, 0,  0.20, a);
+            blendBone(this.boneMap.rightUpLeg, 1.05, 0, -0.20, a);
 
-            // Knee BENDS (maximum fold)
-            blendBone(this.boneMap.leftLeg,    1.90, 0, 0,     0.15);
-            blendBone(this.boneMap.rightLeg,   1.90, 0, 0,     0.15);
+            // Knees: strong bend
+            blendBone(this.boneMap.leftLeg,  1.50, 0, 0, a);
+            blendBone(this.boneMap.rightLeg, 1.50, 0, 0, a);
 
-            // Ankles compensate hard
-            blendBone(this.boneMap.leftFoot,  -0.60, 0, 0,     0.15);
-            blendBone(this.boneMap.rightFoot, -0.60, 0, 0,     0.15);
+            // Ankles: compensate to keep feet flat
+            blendBone(this.boneMap.leftFoot,  -0.50, 0, 0, a);
+            blendBone(this.boneMap.rightFoot, -0.50, 0, 0, a);
 
+            // Arms: down at sides for balance
             if (!hasLivePose) {
-                // Stabilizing arms (out for balance)
-                blendBone(this.boneMap.leftArm,  0.2, 0.4, 1.2, 0.15);
-                blendBone(this.boneMap.rightArm, 0.2, -0.4, 1.2, 0.15);
+                blendBone(this.boneMap.leftArm,      0.10,  0.25, 1.2, a);
+                blendBone(this.boneMap.rightArm,     0.10, -0.25, 1.2, a);
+                blendBone(this.boneMap.leftForeArm,  0.4, 0, 0, a);
+                blendBone(this.boneMap.rightForeArm, 0.4, 0, 0, a);
             }
 
         } else if (state === 'jump') {
-            // Reset hips if jumping
-            const hips = this.bones[this.boneMap.hips];
-            if (hips) hips.position.y = 0;
-
             if (!hasLivePose) {
                 blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
                 blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
@@ -352,10 +375,6 @@ class AvatarRenderer {
                 blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
                 blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
             }
-        } else {
-            // Idle/Default: Ensure Hips position is reset
-            const hips = this.bones[this.boneMap.hips];
-            if (hips) hips.position.y = 0;
         }
     }
 

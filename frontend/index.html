@@ -1,26 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PosiSim – 3D Motion Capture</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Matter – 3D Motion Capture</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet">
     <style>
-        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         :root {
-            --bg:        #07070f;
-            --panel:     #0d0d1a;
-            --border:    #1a1a30;
-            --cyan:      #00d4ff;
-            --green:     #00ff88;
-            --orange:    #ff7043;
-            --red:       #ff3232;
-            --text:      #c8d0e0;
-            --muted:     #4a5068;
-            --font:      'Inter', sans-serif;
-            --mono:      'JetBrains Mono', monospace;
+            --bg: #07070f;
+            --panel: #0d0d1a;
+            --border: #1a1a30;
+            --cyan: #00d4ff;
+            --green: #00ff88;
+            --orange: #ff7043;
+            --red: #ff3232;
+            --text: #c8d0e0;
+            --muted: #4a5068;
+            --font: 'Inter', sans-serif;
+            --mono: 'JetBrains Mono', monospace;
         }
 
         body {
@@ -32,7 +44,11 @@
         }
 
         /* ── Layout ── */
-        #container { display: flex; flex-direction: column; height: 100vh; }
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
 
         #main-content {
             display: flex;
@@ -51,7 +67,11 @@
             min-width: 0;
         }
 
-        #canvas-panel canvas { display: block; width: 100%; height: 100%; }
+        #canvas-panel canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
 
         /* ── Dashboard ── */
         #dashboard-panel {
@@ -77,6 +97,7 @@
             align-items: center;
             gap: 6px;
         }
+
         .section-title::after {
             content: '';
             flex: 1;
@@ -91,16 +112,24 @@
             font-size: 12px;
             margin-bottom: 6px;
         }
-        .stat-label { color: var(--muted); }
-        .stat-value { color: var(--cyan); font-family: var(--mono); font-weight: 600; }
+
+        .stat-label {
+            color: var(--muted);
+        }
+
+        .stat-value {
+            color: var(--cyan);
+            font-family: var(--mono);
+            font-weight: 600;
+        }
 
         /* Position readout */
         #pos-readout {
             font-family: var(--mono);
             font-size: 11px;
             color: var(--green);
-            background: rgba(0,255,136,.05);
-            border: 1px solid rgba(0,255,136,.15);
+            background: rgba(0, 255, 136, .05);
+            border: 1px solid rgba(0, 255, 136, .15);
             border-radius: 6px;
             padding: 8px 10px;
             line-height: 1.8;
@@ -115,20 +144,57 @@
             font-size: 12px;
             letter-spacing: 1px;
             text-transform: uppercase;
-            background: rgba(0,212,255,.08);
-            border: 1px solid rgba(0,212,255,.2);
+            background: rgba(0, 212, 255, .08);
+            border: 1px solid rgba(0, 212, 255, .2);
             color: var(--cyan);
             transition: all .2s;
         }
-        #action-state.running { background: rgba(0,255,136,.1); border-color: var(--green); color: var(--green); }
-        #action-state.crouching { background: rgba(255,112,67,.1); border-color: var(--orange); color: var(--orange); }
-        #action-state.jumping { background: rgba(255,50,50,.1); border-color: var(--red); color: var(--red); }
+
+        #action-state.running {
+            background: rgba(0, 255, 136, .1);
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        #action-state.crouching {
+            background: rgba(255, 112, 67, .1);
+            border-color: var(--orange);
+            color: var(--orange);
+        }
+
+        #action-state.jumping {
+            background: rgba(255, 50, 50, .1);
+            border-color: var(--red);
+            color: var(--red);
+        }
 
         /* Uncertainty bars */
-        .bar-wrap { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
-        .bar-label { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
-        .bar-track { height: 6px; background: rgba(255,255,255,.05); border-radius: 3px; overflow: hidden; }
-        .bar-fill { height: 100%; border-radius: 3px; transition: width .3s, background .3s; }
+        .bar-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            margin-bottom: 10px;
+        }
+
+        .bar-label {
+            font-size: 11px;
+            color: var(--muted);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .bar-track {
+            height: 6px;
+            background: rgba(255, 255, 255, .05);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width .3s, background .3s;
+        }
 
         #trust-badge {
             padding: 8px;
@@ -138,48 +204,74 @@
             font-size: 12px;
             animation: pulse 2s ease-in-out infinite;
         }
-        #trust-badge.trusted   { background: rgba(0,255,136,.1); color: var(--green); border: 1px solid var(--green); }
-        #trust-badge.untrusted { background: rgba(255,50,50,.1);  color: var(--red);   border: 1px solid var(--red); }
 
-        @keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:.65 } }
+        #trust-badge.trusted {
+            background: rgba(0, 255, 136, .1);
+            color: var(--green);
+            border: 1px solid var(--green);
+        }
+
+        #trust-badge.untrusted {
+            background: rgba(255, 50, 50, .1);
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .65
+            }
+        }
 
         #uncertainty-graph {
-            width: 100%; height: 100px;
-            background: rgba(0,212,255,.03);
+            width: 100%;
+            height: 100px;
+            background: rgba(0, 212, 255, .03);
             border: 1px solid var(--border);
             border-radius: 4px;
         }
 
         /* ── Pose Mode button ── */
         #pose-mode-btn {
-            background: rgba(0,212,255,.1);
+            background: rgba(0, 212, 255, .1);
             color: var(--cyan);
-            border: 1px solid rgba(0,212,255,.3);
+            border: 1px solid rgba(0, 212, 255, .3);
             padding: 8px 18px;
         }
+
         #pose-mode-btn.active {
-            background: rgba(0,255,136,.15);
+            background: rgba(0, 255, 136, .15);
             color: var(--green);
             border-color: var(--green);
-            box-shadow: 0 0 10px rgba(0,255,136,.3);
+            box-shadow: 0 0 10px rgba(0, 255, 136, .3);
         }
+
         /* ── Calibration bar ── */
         #calib-bar-wrap {
             display: none;
             margin-top: 8px;
         }
+
         #calib-label {
             font-size: 10px;
             color: var(--muted);
             margin-bottom: 4px;
             font-family: var(--mono);
         }
+
         #calib-bar-track {
             height: 6px;
-            background: rgba(255,255,255,.05);
+            background: rgba(255, 255, 255, .05);
             border-radius: 3px;
             overflow: hidden;
         }
+
         #calib-bar-fill {
             height: 100%;
             width: 0%;
@@ -202,12 +294,16 @@
             z-index: 10;
         }
 
-        .key-row { display: flex; gap: 4px; }
+        .key-row {
+            display: flex;
+            gap: 4px;
+        }
 
         .key {
-            width: 36px; height: 36px;
-            background: rgba(10,10,20,.75);
-            border: 1px solid rgba(0,212,255,.2);
+            width: 36px;
+            height: 36px;
+            background: rgba(10, 10, 20, .75);
+            border: 1px solid rgba(0, 212, 255, .2);
             border-radius: 6px;
             display: flex;
             align-items: center;
@@ -215,16 +311,20 @@
             font-family: var(--mono);
             font-size: 11px;
             font-weight: 600;
-            color: rgba(0,212,255,.5);
+            color: rgba(0, 212, 255, .5);
             backdrop-filter: blur(6px);
             transition: all .08s;
         }
-        .key.wide { width: 58px; }
+
+        .key.wide {
+            width: 58px;
+        }
+
         .key.active {
-            background: rgba(0,212,255,.18);
+            background: rgba(0, 212, 255, .18);
             border-color: var(--cyan);
             color: var(--cyan);
-            box-shadow: 0 0 10px rgba(0,212,255,.4);
+            box-shadow: 0 0 10px rgba(0, 212, 255, .4);
         }
 
         .key-hint {
@@ -240,8 +340,8 @@
             position: absolute;
             bottom: 16px;
             right: 16px;
-            background: rgba(10,10,20,.75);
-            border: 1px solid rgba(0,212,255,.2);
+            background: rgba(10, 10, 20, .75);
+            border: 1px solid rgba(0, 212, 255, .2);
             border-radius: 8px;
             padding: 8px 14px;
             backdrop-filter: blur(6px);
@@ -251,13 +351,18 @@
             z-index: 10;
             pointer-events: none;
         }
-        #speed-hud .hud-val { font-size: 20px; font-weight: 700; color: var(--green); }
+
+        #speed-hud .hud-val {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--green);
+        }
 
         /* ── Loading overlay ── */
         #loading-overlay {
             position: absolute;
             inset: 0;
-            background: rgba(7,7,15,.9);
+            background: rgba(7, 7, 15, .9);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -265,21 +370,33 @@
             z-index: 100;
             gap: 14px;
         }
+
         #loading-overlay .spinner {
-            width: 48px; height: 48px;
+            width: 48px;
+            height: 48px;
             border: 3px solid var(--border);
             border-top-color: var(--cyan);
             border-radius: 50%;
             animation: spin .8s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        #loading-pct { font-family: var(--mono); color: var(--cyan); font-size: 14px; }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #loading-pct {
+            font-family: var(--mono);
+            color: var(--cyan);
+            font-size: 14px;
+        }
 
         /* ── Countdown overlay ── */
         #countdown-overlay {
             position: absolute;
             inset: 0;
-            background: rgba(7,7,15,.85);
+            background: rgba(7, 7, 15, .85);
             display: none;
             flex-direction: column;
             align-items: center;
@@ -287,26 +404,42 @@
             z-index: 99;
             gap: 20px;
         }
-        #countdown-overlay.show { display: flex; }
+
+        #countdown-overlay.show {
+            display: flex;
+        }
+
         #countdown-number {
             font-family: var(--mono);
             font-size: 120px;
             font-weight: 700;
             color: var(--cyan);
             line-height: 1;
-            text-shadow: 0 0 30px rgba(0,212,255,.6);
+            text-shadow: 0 0 30px rgba(0, 212, 255, .6);
             animation: pulse-countdown .3s ease-out;
         }
+
         #countdown-label {
             font-size: 16px;
             color: var(--text);
             letter-spacing: 2px;
             text-transform: uppercase;
         }
+
         @keyframes pulse-countdown {
-            0% { transform: scale(0.5); opacity: 0; }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); opacity: 1; }
+            0% {
+                transform: scale(0.5);
+                opacity: 0;
+            }
+
+            50% {
+                transform: scale(1.1);
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
         }
 
         /* ── Control bar ── */
@@ -321,7 +454,10 @@
             flex-shrink: 0;
         }
 
-        .btn-group { display: flex; gap: 8px; }
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
 
         button {
             padding: 8px 18px;
@@ -335,423 +471,513 @@
             text-transform: uppercase;
             transition: all .2s;
         }
-        #start-btn { background: var(--green); color: #000; }
-        #start-btn:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 0 14px rgba(0,255,136,.5); }
-        #stop-btn  { background: var(--red);   color: #fff; }
-        #stop-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 14px rgba(255,50,50,.5); }
-        #save-btn  { background: var(--cyan);  color: #000; }
-        #save-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 14px rgba(0,212,255,.5); }
-        button:disabled { opacity: .4; cursor: not-allowed; }
 
-        .status-info { display: flex; gap: 16px; font-size: 11px; align-items: center; }
-        .status-item { display: flex; align-items: center; gap: 6px; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
-        .dot.on { background: var(--green); box-shadow: 0 0 6px rgba(0,255,136,.8); }
-        .status-text { color: var(--muted); }
-        .status-value { color: var(--cyan); font-weight: 600; font-family: var(--mono); }
+        #start-btn {
+            background: var(--green);
+            color: #000;
+        }
 
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        #start-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+            box-shadow: 0 0 14px rgba(0, 255, 136, .5);
+        }
+
+        #stop-btn {
+            background: var(--red);
+            color: #fff;
+        }
+
+        #stop-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+            box-shadow: 0 0 14px rgba(255, 50, 50, .5);
+        }
+
+        #save-btn {
+            background: var(--cyan);
+            color: #000;
+        }
+
+        #save-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+            box-shadow: 0 0 14px rgba(0, 212, 255, .5);
+        }
+
+        button:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+        }
+
+        .status-info {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--red);
+        }
+
+        .dot.on {
+            background: var(--green);
+            box-shadow: 0 0 6px rgba(0, 255, 136, .8);
+        }
+
+        .status-text {
+            color: var(--muted);
+        }
+
+        .status-value {
+            color: var(--cyan);
+            font-weight: 600;
+            font-family: var(--mono);
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 2px;
+        }
     </style>
 </head>
+
 <body>
-<div id="container">
-    <div id="main-content">
+    <div id="container">
+        <div id="main-content">
 
-        <!-- ── 3D Canvas ── -->
-        <div id="canvas-panel">
-            <div id="3d-canvas" style="width:100%;height:100%;"></div>
+            <!-- ── 3D Canvas ── -->
+            <div id="canvas-panel">
+                <div id="3d-canvas" style="width:100%;height:100%;"></div>
 
-            <!-- Loading overlay -->
-            <div id="loading-overlay">
-                <div class="spinner"></div>
-                <div id="loading-pct">0%</div>
-                <div style="color:var(--muted);font-size:12px;">Loading avatar…</div>
-            </div>
-
-            <!-- Countdown overlay -->
-            <div id="countdown-overlay">
-                <div id="countdown-number">5</div>
-                <div id="countdown-label">Get ready…</div>
-            </div>
-
-            <!-- WASD keyboard HUD -->
-            <div id="keyboard-hud">
-                <div class="key-row">
-                    <div class="key" data-key="q">Q</div>
-                    <div class="key" data-key="w">W</div>
-                    <div class="key" data-key="e">E</div>
+                <!-- Loading overlay -->
+                <div id="loading-overlay">
+                    <div class="spinner"></div>
+                    <div id="loading-pct">0%</div>
+                    <div style="color:var(--muted);font-size:12px;">Loading avatar…</div>
                 </div>
-                <div class="key-row">
-                    <div class="key" data-key="a">A</div>
-                    <div class="key" data-key="s">S</div>
-                    <div class="key" data-key="d">D</div>
+
+                <!-- Countdown overlay -->
+                <div id="countdown-overlay">
+                    <div id="countdown-number">5</div>
+                    <div id="countdown-label">Get ready…</div>
                 </div>
-                <div class="key-row">
-                    <div class="key wide" data-key="shift">⇧ Shift</div>
-                    <div class="key wide" data-key=" ">Space</div>
-                    <div class="key wide" data-key="control">Ctrl</div>
+
+                <!-- WASD keyboard HUD -->
+                <div id="keyboard-hud">
+                    <div class="key-row">
+                        <div class="key" data-key="q">Q</div>
+                        <div class="key" data-key="w">W</div>
+                        <div class="key" data-key="e">E</div>
+                    </div>
+                    <div class="key-row">
+                        <div class="key" data-key="a">A</div>
+                        <div class="key" data-key="s">S</div>
+                        <div class="key" data-key="d">D</div>
+                    </div>
+                    <div class="key-row">
+                        <div class="key wide" data-key="shift">⇧ Shift</div>
+                        <div class="key wide" data-key=" ">Space</div>
+                    </div>
+                    <div class="key-hint">WASD · Q Crouch · E Strafe · Space Jump · Shift Sprint</div>
                 </div>
-                <div class="key-hint">WASD · Q/E Turn · Space Jump · Shift Sprint · Ctrl Crouch</div>
-            </div>
 
-            <!-- Speed HUD -->
-            <div id="speed-hud">
-                <div class="hud-val" id="speed-val">0.0</div>
-                <div style="color:var(--muted);font-size:9px;margin-top:2px;">units/s</div>
-            </div>
-        </div>
-
-        <!-- ── Dashboard ── -->
-        <div id="dashboard-panel">
-
-            <div>
-                <div class="section-title">Avatar State</div>
-                <div id="action-state">IDLE</div>
-                <br>
-                <div id="pos-readout">
-                    X: <span id="pos-x">0.0</span><br>
-                    Y: <span id="pos-y">0.0</span><br>
-                    Z: <span id="pos-z">0.0</span><br>
-                    R: <span id="pos-r">0°</span>
+                <!-- Speed HUD -->
+                <div id="speed-hud">
+                    <div class="hud-val" id="speed-val">0.0</div>
+                    <div style="color:var(--muted);font-size:9px;margin-top:2px;">units/s</div>
                 </div>
             </div>
 
-            <div>
-                <div class="section-title">Pose Control</div>
-                <button id="pose-mode-btn">🎥 Pose OFF</button>
-                <div id="calib-bar-wrap">
-                    <div id="calib-label">Stand still — calibrating 0%</div>
-                    <div id="calib-bar-track">
-                        <div id="calib-bar-fill"></div>
+            <!-- ── Dashboard ── -->
+            <div id="dashboard-panel">
+
+                <div>
+                    <div class="section-title">Avatar State</div>
+                    <div id="action-state">IDLE</div>
+                    <br>
+                    <div id="pos-readout">
+                        X: <span id="pos-x">0.0</span><br>
+                        Y: <span id="pos-y">0.0</span><br>
+                        Z: <span id="pos-z">0.0</span><br>
+                        R: <span id="pos-r">0°</span>
                     </div>
                 </div>
-            </div>
 
-            <div>
-                <div class="section-title">Frame Data</div>
-                <div class="stat-row"><span class="stat-label">Frame</span><span class="stat-value" id="frame-count">0</span></div>
-                <div class="stat-row"><span class="stat-label">BVH Frames</span><span class="stat-value" id="bvh-frames">0</span></div>
-                <div class="stat-row"><span class="stat-label">Skipped</span><span class="stat-value" id="skipped-frames">0</span></div>
-                <div class="stat-row"><span class="stat-label">Coverage</span><span class="stat-value" id="coverage-pct">0%</span></div>
-            </div>
-
-            <div>
-                <div class="section-title">Uncertainty</div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Aleatoric</span><span id="aleatoric-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="aleatoric-bar" style="width:0%"></div></div>
+                <div>
+                    <div class="section-title">Pose Control</div>
+                    <button id="pose-mode-btn">🎥 Pose OFF</button>
+                    <div id="calib-bar-wrap">
+                        <div id="calib-label">Stand still — calibrating 0%</div>
+                        <div id="calib-bar-track">
+                            <div id="calib-bar-fill"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Epistemic</span><span id="epistemic-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="epistemic-bar" style="width:0%"></div></div>
-                </div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Total</span><span id="total-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="total-bar" style="width:0%"></div></div>
-                </div>
-                <div id="trust-badge" class="trusted">✓ TRUSTED</div>
-            </div>
 
-            <div>
-                <div class="section-title">History</div>
-                <canvas id="uncertainty-graph"></canvas>
-            </div>
+                <div>
+                    <div class="section-title">Frame Data</div>
+                    <div class="stat-row"><span class="stat-label">Frame</span><span class="stat-value"
+                            id="frame-count">0</span></div>
+                    <div class="stat-row"><span class="stat-label">BVH Frames</span><span class="stat-value"
+                            id="bvh-frames">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Skipped</span><span class="stat-value"
+                            id="skipped-frames">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Coverage</span><span class="stat-value"
+                            id="coverage-pct">0%</span></div>
+                </div>
 
+                <div>
+                    <div class="section-title">Uncertainty</div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Aleatoric</span><span id="aleatoric-val">0.000</span></div>
+                        <div class="bar-track">
+                            <div class="bar-fill" id="aleatoric-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Epistemic</span><span id="epistemic-val">0.000</span></div>
+                        <div class="bar-track">
+                            <div class="bar-fill" id="epistemic-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Total</span><span id="total-val">0.000</span></div>
+                        <div class="bar-track">
+                            <div class="bar-fill" id="total-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div id="trust-badge" class="trusted">✓ TRUSTED</div>
+                </div>
+
+                <div>
+                    <div class="section-title">History</div>
+                    <canvas id="uncertainty-graph"></canvas>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Control Bar ── -->
+        <div id="control-bar">
+            <div class="btn-group">
+                <button id="start-btn">▶ Start Rec</button>
+                <button id="stop-btn" disabled>⏹ Stop</button>
+                <button id="save-btn" disabled>💾 Save BVH</button>
+                <button id="recalib-btn" title="Reset pose calibration">↺ Recalibrate</button>
+            </div>
+            <div class="status-info">
+                <div class="status-item">
+                    <div class="dot" id="ws-dot"></div>
+                    <span class="status-text">WS: <span class="status-value" id="ws-status">…</span></span>
+                </div>
+                <div class="status-item">
+                    <span class="status-text">FPS: <span class="status-value" id="fps-counter">0</span></span>
+                </div>
+                <div class="status-item">
+                    <span class="status-text">Cam: <span class="status-value" id="cam-status">–</span></span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- ── Control Bar ── -->
-    <div id="control-bar">
-        <div class="btn-group">
-            <button id="start-btn">▶ Start Rec</button>
-            <button id="stop-btn" disabled>⏹ Stop</button>
-            <button id="save-btn" disabled>💾 Save BVH</button>
-            <button id="recalib-btn" title="Reset pose calibration">↺ Recalibrate</button>
-        </div>
-        <div class="status-info">
-            <div class="status-item">
-                <div class="dot" id="ws-dot"></div>
-                <span class="status-text">WS: <span class="status-value" id="ws-status">…</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-text">FPS: <span class="status-value" id="fps-counter">0</span></span>
-            </div>
-            <div class="status-item">
-                <span class="status-text">Cam: <span class="status-value" id="cam-status">–</span></span>
-            </div>
-        </div>
-    </div>
-</div>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-<!-- Three.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Environments (load before avatar so classes are defined) -->
+    <script src="/frontend/environments/obstacle_course.js?v=6"></script>
 
-<!-- App scripts -->
-<script src="/frontend/action_controller.js"></script>
-<script src="/frontend/avatar.js"></script>
-<script src="/frontend/pose_action_mapper.js"></script>
-<script src="/frontend/uncertainty_ui.js"></script>
+    <!-- App scripts -->
+    <script src="/frontend/action_controller.js?v=6"></script>
+    <script src="/frontend/avatar.js?v=6"></script>
+    <script src="/frontend/pose_action_mapper.js?v=6"></script>
+    <script src="/frontend/uncertainty_ui.js?v=6"></script>
 
-<script>
-// ── Main App ──────────────────────────────────────────────────────────────────
-class PosiSimApp {
-    constructor() {
-        this.ws        = null;
-        this.avatar    = null;
-        this.ui        = null;
-        this.recording = false;
+    <script>
+        // ── Main App ──────────────────────────────────────────────────────────────────
+        class MatterApp {
+            constructor() {
+                this.ws = null;
+                this.avatar = null;
+                this.ui = null;
+                this.recording = false;
 
-        // FPS counter
-        this._frameCount  = 0;
-        this._lastFpsTime = Date.now();
+                // FPS counter
+                this._frameCount = 0;
+                this._lastFpsTime = Date.now();
 
-        // Action system
-        this.actionCtrl  = new ActionController(new ActionConfig());
-        this.poseActionMapper = new PoseActionMapper(this.actionCtrl);
-        this.keyboardCtrl = null;   // created after avatar is ready
-        this.poseModeCtrl = null;   // created after WS connects
-        this.keyHUD      = new KeyboardHUD();
+                // Action system
+                this.actionCtrl = new ActionController(new ActionConfig());
+                this.poseActionMapper = new PoseActionMapper(this.actionCtrl);
+                this.keyboardCtrl = null;   // created after avatar is ready
+                this.poseModeCtrl = null;   // created after WS connects
+                this.keyHUD = new KeyboardHUD();
 
-        // Speed estimation
-        this._lastPos    = new THREE.Vector3();
-        this._lastPosTime = performance.now();
+                // Environment manager — build it early so it's ready when avatar loads
+                this.envManager = new EnvironmentManager(null); // scene attached later
 
-        this._setupButtons();
-        this._connectWebSocket();
-        this._startFPSCounter();
-        this._startActionLoop();
-    }
+                // Speed estimation
+                this._lastPos = new THREE.Vector3();
+                this._lastPosTime = performance.now();
 
-    // ── UI ────────────────────────────────────────────────────────────────────
-    _setupButtons() {
-        document.getElementById('start-btn').onclick = () => this._startRecording();
-        document.getElementById('stop-btn').onclick  = () => this._stopRecording();
-        document.getElementById('save-btn').onclick  = () => this._saveBVH();
-    }
-
-    // ── WebSocket ─────────────────────────────────────────────────────────────
-    _connectWebSocket() {
-        this.ws = new WebSocket('ws://localhost:8000/ws');
-
-        this.ws.onopen = () => {
-            this._setWSStatus('Connected', true);
-
-            // Create 3D avatar + keyboard controller once WS is up
-            if (!this.avatar) {
-                this.avatar = new AvatarRenderer('3d-canvas');
-                document.getElementById('loading-overlay').style.display = 'flex';
+                this._setupButtons();
+                this._connectWebSocket();
+                this._startFPSCounter();
+                this._startActionLoop();
             }
 
-            // Wire keyboard → action controller → WS notification
-            if (!this.keyboardCtrl) {
-                this.keyboardCtrl = new KeyboardController(this.actionCtrl, (key, isDown) => {
-                    // Notify backend so it can tag BVH with action context
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({
-                            action: isDown ? 'key_down' : 'key_up',
-                            key
-                        }));
+            // ── UI ────────────────────────────────────────────────────────────────────
+            _setupButtons() {
+                document.getElementById('start-btn').onclick = () => this._startRecording();
+                document.getElementById('stop-btn').onclick = () => this._stopRecording();
+                document.getElementById('save-btn').onclick = () => this._saveBVH();
+            }
+
+            // ── WebSocket ─────────────────────────────────────────────────────────────
+            _connectWebSocket() {
+                this.ws = new WebSocket('ws://localhost:8000/ws');
+
+                this.ws.onopen = () => {
+                    this._setWSStatus('Connected', true);
+
+                    // Create 3D avatar + keyboard controller once WS is up
+                    if (!this.avatar) {
+                        // 1. Create avatar first — its constructor creates the Three.js scene
+                        this.avatar = new AvatarRenderer('3d-canvas', this.envManager);
+                        document.getElementById('loading-overlay').style.display = 'flex';
+
+                        // 2. Now that the scene exists, wire it into the env manager and load the course
+                        this.envManager.scene = this.avatar.scene;
+                        const env = this.envManager.load('obstacle_course');
+
+                        // 3. Wire the loaded environment into the physics controller
+                        this.actionCtrl.setEnvironment(env);
                     }
-                });
+
+                    // Wire keyboard → action controller → WS notification
+                    if (!this.keyboardCtrl) {
+                        this.keyboardCtrl = new KeyboardController(this.actionCtrl, (key, isDown) => {
+                            // Notify backend so it can tag BVH with action context
+                            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                                this.ws.send(JSON.stringify({
+                                    action: isDown ? 'key_down' : 'key_up',
+                                    key
+                                }));
+                            }
+                        });
+                    }
+
+                    this.poseModeCtrl = new PoseModeController((msg) => {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN)
+                            this.ws.send(JSON.stringify(msg));
+                    });
+
+                    document.getElementById('recalib-btn').onclick = () =>
+                        this.poseModeCtrl && this.poseModeCtrl.resetCalibration();
+
+                    this.ui = new UncertaintyUI();
+                };
+
+                this.ws.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.event) this._handleEvent(data);
+                        else if (data.frame != null) this._handleFrame(data);
+                    } catch (err) { console.error('WS parse error:', err); }
+                };
+
+                this.ws.onerror = () => this._setWSStatus('Error', false);
+                this.ws.onclose = () => {
+                    this._setWSStatus('Disconnected', false);
+                    setTimeout(() => this._connectWebSocket(), 3000);
+                };
             }
 
-            this.poseModeCtrl = new PoseModeController((msg) => {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN)
-                    this.ws.send(JSON.stringify(msg));
-            });
+            _handleFrame(data) {
+                this._frameCount++;
 
-            document.getElementById('recalib-btn').onclick = () =>
-                this.poseModeCtrl && this.poseModeCtrl.resetCalibration();
+                document.getElementById('frame-count').textContent = data.frame;
+                document.getElementById('bvh-frames').textContent = data.bvh_frames;
+                document.getElementById('skipped-frames').textContent = data.bvh_skipped;
+                document.getElementById('cam-status').textContent = 'Active';
 
-            this.ui = new UncertaintyUI();
-        };
+                if (data.frame > 0) {
+                    const cov = ((data.bvh_frames / (data.frame + 1)) * 100).toFixed(1);
+                    document.getElementById('coverage-pct').textContent = cov + '%';
+                }
 
-        this.ws.onmessage = (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                if (data.event)            this._handleEvent(data);
-                else if (data.frame != null) this._handleFrame(data);
-            } catch (err) { console.error('WS parse error:', err); }
-        };
+                if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
-        this.ws.onerror  = () => this._setWSStatus('Error', false);
-        this.ws.onclose  = () => {
-            this._setWSStatus('Disconnected', false);
-            setTimeout(() => this._connectWebSocket(), 3000);
-        };
-    }
+                // ── Pose Action Mapping ─────────────────────────────────────────────
+                if (this.poseActionMapper) {
+                    this.poseActionMapper.update(data.landmarks, data.pose_mode);
+                }
 
-    _handleFrame(data) {
-        this._frameCount++;
+                // Sync pose mode flag so keyboard is blocked when pose is active
+                this.actionCtrl.poseMode = data.pose_mode ?? false;
 
-        document.getElementById('frame-count').textContent    = data.frame;
-        document.getElementById('bvh-frames').textContent     = data.bvh_frames;
-        document.getElementById('skipped-frames').textContent = data.bvh_skipped;
-        document.getElementById('cam-status').textContent     = 'Active';
+                // Update calibration bar
+                if (this.poseModeCtrl) {
+                    this.poseModeCtrl.onFrame(
+                        data.pose_mode ?? false,
+                        data.calibrated ?? false,
+                        data.calib_progress ?? 0
+                    );
+                }
 
-        if (data.frame > 0) {
-            const cov = ((data.bvh_frames / (data.frame + 1)) * 100).toFixed(1);
-            document.getElementById('coverage-pct').textContent = cov + '%';
-        }
-
-        if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
-
-        // ── Pose Action Mapping ─────────────────────────────────────────────
-        if (this.poseActionMapper) {
-            this.poseActionMapper.update(data.landmarks, data.pose_mode);
-        }
-
-        // Sync pose mode flag so keyboard is blocked when pose is active
-        this.actionCtrl.poseMode = data.pose_mode ?? false;
-
-        // Update calibration bar
-        if (this.poseModeCtrl) {
-            this.poseModeCtrl.onFrame(
-                data.pose_mode     ?? false,
-                data.calibrated    ?? false,
-                data.calib_progress ?? 0
-            );
-        }
-
-        // Hide loading overlay once first frame arrives
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay.style.display !== 'none') overlay.style.display = 'none';
-    }
-
-    _handleEvent(data) {
-        switch (data.event) {
-            case 'recording_started':
-                this.recording = true;
-                document.getElementById('start-btn').disabled = true;
-                document.getElementById('stop-btn').disabled  = false;
-                break;
-            case 'bvh_saved':
-                document.getElementById('save-btn').disabled = true;
-                alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
-                break;
-            case 'pose_mode_changed':
-                console.log('Pose mode:', data.pose_mode);
-                break;
-            case 'calibration_reset':
-                console.log('Calibration reset.');
-                break;
-        }
-    }
-
-    // ── Action loop (runs at rAF rate, independent of WS) ────────────────────
-    _lastActionTime = performance.now();
-
-    _startActionLoop() {
-        const tick = () => {
-            requestAnimationFrame(tick);
-
-            const now = performance.now();
-            const dt  = Math.min((now - this._lastActionTime) / 1000, 0.05);
-            this._lastActionTime = now;
-
-            const { position, rotationRad, locomotionState } = this.actionCtrl.update(dt);
-
-            if (this.avatar) {
-                this.avatar.setWorldTransform(position, rotationRad, locomotionState);
+                // Hide loading overlay once first frame arrives
+                const overlay = document.getElementById('loading-overlay');
+                if (overlay.style.display !== 'none') overlay.style.display = 'none';
             }
 
-            // Update HUD
-            if (this.keyboardCtrl) {
-                this.keyHUD.update(this.keyboardCtrl.getHeldKeys());
+            _handleEvent(data) {
+                switch (data.event) {
+                    case 'recording_started':
+                        this.recording = true;
+                        document.getElementById('start-btn').disabled = true;
+                        document.getElementById('stop-btn').disabled = false;
+                        break;
+                    case 'bvh_saved':
+                        document.getElementById('save-btn').disabled = true;
+                        alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
+                        break;
+                    case 'pose_mode_changed':
+                        console.log('Pose mode:', data.pose_mode);
+                        break;
+                    case 'calibration_reset':
+                        console.log('Calibration reset.');
+                        break;
+                }
             }
 
-            // Position readout
-            document.getElementById('pos-x').textContent = position.x.toFixed(1);
-            document.getElementById('pos-y').textContent = position.y.toFixed(1);
-            document.getElementById('pos-z').textContent = position.z.toFixed(1);
-            document.getElementById('pos-r').textContent =
-                (THREE.MathUtils.radToDeg(rotationRad) % 360).toFixed(0) + '°';
+            // ── Action loop (runs at rAF rate, independent of WS) ────────────────────
+            _lastActionTime = performance.now();
 
-            // Speed estimate
-            const dp   = position.distanceTo(this._lastPos);
-            const ddt  = (now - this._lastPosTime) / 1000;
-            if (ddt > 0.1) {
-                document.getElementById('speed-val').textContent = (dp / ddt).toFixed(1);
-                this._lastPos.copy(position);
-                this._lastPosTime = now;
+            _startActionLoop() {
+                const tick = () => {
+                    requestAnimationFrame(tick);
+
+                    const now = performance.now();
+                    const dt = Math.min((now - this._lastActionTime) / 1000, 0.05);
+                    this._lastActionTime = now;
+
+                    const { position, rotationRad, locomotionState } = this.actionCtrl.update(dt);
+
+                    if (this.avatar) {
+                        this.avatar.setWorldTransform(position, rotationRad, locomotionState);
+                    }
+
+                    // Update HUD
+                    if (this.keyboardCtrl) {
+                        this.keyHUD.update(this.keyboardCtrl.getHeldKeys());
+                    }
+
+                    // Position readout
+                    document.getElementById('pos-x').textContent = position.x.toFixed(1);
+                    document.getElementById('pos-y').textContent = position.y.toFixed(1);
+                    document.getElementById('pos-z').textContent = position.z.toFixed(1);
+                    document.getElementById('pos-r').textContent =
+                        (THREE.MathUtils.radToDeg(rotationRad) % 360).toFixed(0) + '°';
+
+                    // Speed estimate
+                    const dp = position.distanceTo(this._lastPos);
+                    const ddt = (now - this._lastPosTime) / 1000;
+                    if (ddt > 0.1) {
+                        document.getElementById('speed-val').textContent = (dp / ddt).toFixed(1);
+                        this._lastPos.copy(position);
+                        this._lastPosTime = now;
+                    }
+
+                    // Action state badge
+                    const badge = document.getElementById('action-state');
+                    badge.textContent = locomotionState.toUpperCase();
+                    badge.className = '';
+                    if (locomotionState === 'run') badge.classList.add('running');
+                    if (locomotionState === 'crouch') badge.classList.add('crouching');
+                    if (locomotionState === 'jump') badge.classList.add('jumping');
+                };
+                requestAnimationFrame(tick);
             }
 
-            // Action state badge
-            const badge = document.getElementById('action-state');
-            badge.textContent = locomotionState.toUpperCase();
-            badge.className   = '';
-            if (locomotionState === 'run')    badge.classList.add('running');
-            if (locomotionState === 'crouch') badge.classList.add('crouching');
-            if (locomotionState === 'jump')   badge.classList.add('jumping');
-        };
-        requestAnimationFrame(tick);
-    }
+            // ── Recording controls ────────────────────────────────────────────────────
+            _startRecording() {
+                this._showCountdown('Recording starts in…');
+                setTimeout(() => {
+                    this.ws.send(JSON.stringify({ action: 'start_recording' }));
+                }, 5000);
+            }
+            _stopRecording() {
+                this.ws.send(JSON.stringify({ action: 'stop_recording' }));
+                this.recording = false;
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('save-btn').disabled = false;
+            }
+            _saveBVH() {
+                this.ws.send(JSON.stringify({ action: 'save_bvh' }));
+            }
 
-    // ── Recording controls ────────────────────────────────────────────────────
-    _startRecording() {
-        this._showCountdown('Recording starts in…');
-        setTimeout(() => {
-            this.ws.send(JSON.stringify({ action: 'start_recording' }));
-        }, 5000);
-    }
-    _stopRecording() {
-        this.ws.send(JSON.stringify({ action: 'stop_recording' }));
-        this.recording = false;
-        document.getElementById('start-btn').disabled = false;
-        document.getElementById('stop-btn').disabled  = true;
-        document.getElementById('save-btn').disabled  = false;
-    }
-    _saveBVH() {
-        this.ws.send(JSON.stringify({ action: 'save_bvh' }));
-    }
+            // ── Countdown overlay ────────────────────────────────────────────────────
+            _showCountdown(label = 'Get ready…') {
+                const overlay = document.getElementById('countdown-overlay');
+                const numEl = document.getElementById('countdown-number');
+                const labelEl = document.getElementById('countdown-label');
 
-    // ── Countdown overlay ────────────────────────────────────────────────────
-    _showCountdown(label = 'Get ready…') {
-        const overlay = document.getElementById('countdown-overlay');
-        const numEl = document.getElementById('countdown-number');
-        const labelEl = document.getElementById('countdown-label');
-        
-        overlay.classList.add('show');
-        labelEl.textContent = label;
-        
-        let count = 5;
-        numEl.textContent = count;
-        
-        const interval = setInterval(() => {
-            count -= 1;
-            if (count < 0) {
-                clearInterval(interval);
-                overlay.classList.remove('show');
-            } else {
+                overlay.classList.add('show');
+                labelEl.textContent = label;
+
+                let count = 5;
                 numEl.textContent = count;
+
+                const interval = setInterval(() => {
+                    count -= 1;
+                    if (count < 0) {
+                        clearInterval(interval);
+                        overlay.classList.remove('show');
+                    } else {
+                        numEl.textContent = count;
+                    }
+                }, 1000);
             }
-        }, 1000);
-    }
 
-    // ── Status helpers ────────────────────────────────────────────────────────
-    _setWSStatus(label, ok) {
-        document.getElementById('ws-status').textContent = label;
-        document.getElementById('ws-dot').classList.toggle('on', ok);
-    }
+            // ── Status helpers ────────────────────────────────────────────────────────
+            _setWSStatus(label, ok) {
+                document.getElementById('ws-status').textContent = label;
+                document.getElementById('ws-dot').classList.toggle('on', ok);
+            }
 
-    _startFPSCounter() {
-        setInterval(() => {
-            const now   = Date.now();
-            const delta = (now - this._lastFpsTime) / 1000;
-            document.getElementById('fps-counter').textContent = (this._frameCount / delta).toFixed(0);
-            this._frameCount  = 0;
-            this._lastFpsTime = now;
-        }, 1000);
-    }
-}
+            _startFPSCounter() {
+                setInterval(() => {
+                    const now = Date.now();
+                    const delta = (now - this._lastFpsTime) / 1000;
+                    document.getElementById('fps-counter').textContent = (this._frameCount / delta).toFixed(0);
+                    this._frameCount = 0;
+                    this._lastFpsTime = now;
+                }, 1000);
+            }
+        }
 
-window.addEventListener('load', () => {
-    window.posiSimApp = new PosiSimApp();
-});
-</script>
+        window.addEventListener('load', () => {
+            window.matterApp = new MatterApp();
+        });
+    </script>
 </body>
+
 </html>

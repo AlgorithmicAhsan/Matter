@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from pose import PoseExtractor
 from uncertainty import UncertaintyScorer
@@ -17,7 +18,19 @@ from bvh_writer import BVHWriter
 from actions import ActionController, ActionConfig, KeyboardController
 from action_detector import PoseActionDetector          # NEW
 
-app = FastAPI(title="PosiSim - Markerless Motion Capture")
+
+# ── No-cache middleware: prevents browsers from serving stale JS/CSS ────────
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
+app = FastAPI(title="Matter - Markerless Motion Capture")
+app.add_middleware(NoCacheMiddleware)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 MODELS_DIR   = Path(__file__).parent.parent / "models"
@@ -30,6 +43,27 @@ app.mount("/output",   StaticFiles(directory=str(OUTPUT_DIR)),   name="output")
 
 CAMERA_SOURCE = 0
 
+def _derive_locomotion_state(action_ctrl) -> str:
+    actions = set(action_ctrl.active_actions.keys())
+    from actions import ActionType
+    
+    if ActionType.JUMP in actions:
+        return "jump"
+    if ActionType.CROUCH in actions:
+        if ActionType.MOVE_FORWARD in actions or ActionType.MOVE_BACKWARD in actions:
+            return "crouch_walk"
+        return "crouch"
+    if ActionType.SPRINT in actions and ActionType.MOVE_FORWARD in actions:
+        return "run"
+    if ActionType.MOVE_BACKWARD in actions:
+        return "walk_backward"
+    if ActionType.TURN_LEFT in actions:
+        return "turn_left"
+    if ActionType.TURN_RIGHT in actions:
+        return "turn_right"
+    if ActionType.MOVE_FORWARD in actions:
+        return "walk"
+    return "idle"
 
 class SessionState:
     def __init__(self):
@@ -46,7 +80,7 @@ class SessionState:
         self.action_ctrl   = ActionController(ActionConfig())
         self.keyboard_ctrl = KeyboardController(self.action_ctrl)
         self.pose_detector = PoseActionDetector()       # NEW
-        self.pose_mode     = False                      # NEW: toggled by frontend
+        self.pose_mode     = True                      # NEW: toggled by frontend
         self._last_update_time = time.time()
 
 state = SessionState()
@@ -54,7 +88,11 @@ state = SessionState()
 
 @app.get("/")
 async def root():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    response = FileResponse(str(FRONTEND_DIR / "index.html"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.get("/health")
 async def health():
@@ -134,6 +172,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "frame":       state.frame_count,
                 "recording":   state.recording,
                 "image":       frame_base64,
+                "active_actions":   [a.value for a in state.action_ctrl.active_actions.keys()],
+                "locomotion_state": _derive_locomotion_state(state.action_ctrl),
                 "bvh_frames":  len(state.writer.frames),
                 "bvh_skipped": state.writer.skipped,
                 "uncertainty": {
@@ -262,6 +302,6 @@ async def handle_command(command: dict, websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    print("Starting PosiSim backend...")
+    print("Starting Matter backend...")
     print("Open http://localhost:8000 in your browser.")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

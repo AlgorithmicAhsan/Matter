@@ -1,4 +1,4 @@
-# PosiSim - Motion Capture to Avatar Pipeline
+# Matter - Motion Capture to Avatar Pipeline
 
 Real-time human motion capture using MediaPipe, with uncertainty estimation for reliable motion recording. Outputs Blender-ready BVH files.
 
@@ -31,7 +31,7 @@ mkdir backend frontend models output
 
 Structure should be:
 ```
-PosiSim/
+Matter/
 ├── backend/
 │   ├── main.py
 │   ├── pose.py

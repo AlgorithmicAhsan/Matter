@@ -65,6 +65,25 @@ class ActionController {
         // Internal pose-driven offsets
         this._poseHipX      = undefined;
         this._poseWalkSpeed = 0;
+
+        /** @type {ObstacleCourseEnvironment|null} */
+        this._env = null;
+    }
+
+    /**
+     * Plug in (or swap) an environment so physics queries route through it.
+     * @param {ObstacleCourseEnvironment|null} env
+     */
+    setEnvironment(env) {
+        this._env = env;
+        // Reset the avatar to the ground of the new environment
+        if (env) {
+            const groundY = env.getGroundY(this.position.x, this.position.z);
+            this.config.groundY = groundY;
+            this.position.y     = groundY;
+        } else {
+            this.config.groundY = 0;
+        }
     }
 
     /**
@@ -144,25 +163,77 @@ class ActionController {
             this.deactivate(ActionType.JUMP); // one-shot
         }
 
-        // Vertical physics
-        if (!this.isGrounded) {
-            this.verticalVel    += cfg.gravity * dt;
-            this.position.y     += this.verticalVel * dt;
-            if (this.position.y <= cfg.groundY) {
-                this.position.y  = cfg.groundY;
-                this.verticalVel = 0;
-                this.isGrounded  = true;
-            }
-        }
-
         // Convert local velocity → world space (rotate around Y)
         const sin = Math.sin(this.rotation);
         const cos = Math.cos(this.rotation);
         const worldX = localX * cos + localZ * sin;
         const worldZ = -localX * sin + localZ * cos;
 
+        // Tentative new XZ position (before collision)
+        const prevX = this.position.x;
+        const prevZ = this.position.z;
         this.position.x += worldX * dt;
         this.position.z += worldZ * dt;
+
+        // Environment physics
+        const env = this._env;
+        if (env) {
+            // Avatar height depends on crouch state
+            const avatarH = this.isCrouching ? 75 : 150;
+
+            // 1) AABB wall collision — resolves XZ penetration
+            env.resolveCollisions(this.position, 22, avatarH);
+
+            // 2) Ramp / elevated ground: query current surface Y
+            const groundY = env.getGroundY(this.position.x, this.position.z);
+
+            // 3) Gap detection — if over a gap and grounded, character falls
+            const overGap = env.isOverGap(this.position.x, this.position.z);
+
+            // 4) Vertical physics with environment-aware groundY
+            if (!this.isGrounded || overGap) {
+                this.isGrounded  = false;
+                this.verticalVel += cfg.gravity * dt;
+                this.position.y  += this.verticalVel * dt;
+
+                // Land if we hit the surface below us (and we're not in the gap)
+                if (!overGap && this.position.y <= groundY) {
+                    this.position.y  = groundY;
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+                // Fell off the world — respawn at surface above spawn
+                if (this.position.y < -600) {
+                    this.position.set(0, 0, 0);
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+            } else {
+                // Snap to surface (handles ramp ascent/descent)
+                this.position.y  = groundY;
+                this.isGrounded  = true;
+                this.verticalVel = 0;
+            }
+
+            // 5) Low barrier clearance check: block passage if avatar is too tall
+            const maxH = env.getMaxAvatarHeight(this.position.x, this.position.z);
+            if (avatarH > maxH) {
+                // Revert horizontal movement — character is blocked by the beam
+                this.position.x = prevX;
+                this.position.z = prevZ;
+            }
+        } else {
+            // Fallback: flat ground, no environment
+            if (!this.isGrounded) {
+                this.verticalVel    += cfg.gravity * dt;
+                this.position.y     += this.verticalVel * dt;
+                if (this.position.y <= cfg.groundY) {
+                    this.position.y  = cfg.groundY;
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+            }
+        }
 
         // Determine locomotion state — crouch triggers even when standing still
         const moving     = localX !== 0 || localZ > 0;
@@ -277,11 +348,10 @@ class KeyboardController {
             'arrowleft':  ActionType.TURN_LEFT,
             'd':          ActionType.TURN_RIGHT,
             'arrowright': ActionType.TURN_RIGHT,
-            'q':          ActionType.STRAFE_LEFT,   // Q/E for strafing if needed
+            'q':          ActionType.CROUCH,        // hold to crouch
             'e':          ActionType.STRAFE_RIGHT,
             ' ':          ActionType.JUMP,
             'shift':      ActionType.SPRINT,
-            'control':    ActionType.CROUCH,
         };
 
         this._onKeyDown = this._onKeyDown.bind(this);
@@ -292,8 +362,8 @@ class KeyboardController {
 
     _onKeyDown(e) {
         if (this.ctrl.poseMode) return;   // ← Skip keyboard input in pose mode
-        // Prevent browser from stealing game keys (incl. Ctrl which triggers browser shortcuts)
-        if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Control'].includes(e.key)) {
+        // Prevent browser from stealing game keys
+        if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
         }
 
@@ -388,8 +458,8 @@ class PoseModeController {
         this._updateBtn();
         
         // Show countdown when pose mode is turned ON
-        if (this._poseMode && window.posiSimApp) {
-            window.posiSimApp._showCountdown('Pose calibration starts in…');
+        if (this._poseMode && window.matterApp) {
+            window.matterApp._showCountdown('Pose calibration starts in…');
         }
     }
 
