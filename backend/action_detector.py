@@ -207,23 +207,37 @@ class PoseActionDetector:
             # Wrap to [-π, π] to handle angle discontinuity
             if raw_delta >  math.pi: raw_delta -= 2 * math.pi
             if raw_delta < -math.pi: raw_delta += 2 * math.pi
+            
+            # Prevent 360 spin glitch ONLY during jumps
+            if self._jump_cooldown > 0 and abs(raw_delta) > 1.0:
+                raw_delta = 0.0
+                current_angle = self._prev_shoulder_angle
+                
             self._prev_shoulder_angle = current_angle
 
         # EMA smooth to remove z-axis noise while preserving intentional turns
         a = self.cfg.ROTATION_EMA
         self._smooth_rotation_delta = (
-            a * raw_delta + (1 - a) * self._smooth_rotation_delta
+            a * raw_delta + (1 - a) * getattr(self, '_smooth_rotation_delta', 0.0)
         )
         rotation_delta = self._smooth_rotation_delta * self.cfg.ROTATION_SCALE
+        
         if abs(rotation_delta) < self.cfg.ROTATION_DEADZONE:
             rotation_delta = 0.0
 
-        # ── Hip X: direct position mirroring ──────────────────────────────────
+        # ── Hip X & Y: direct position mirroring ──────────────────────────────
         hip_x = (landmarks[L_HIP]['x'] + landmarks[R_HIP]['x']) / 2
-        # Image X is mirrored: person moves right → hip_x decreases.
-        # We negate so avatar moves right when person moves right.
+        hip_y = (landmarks[L_HIP]['y'] + landmarks[R_HIP]['y']) / 2
+        
+        # X mapping: Image X is mirrored, we negate it
         hip_x_offset = self.neutral_hip_x - hip_x
         hip_x_world  = hip_x_offset * self.cfg.HIP_X_WORLD_SCALE
+
+        # Y mapping: Map crouching directly to physical lowering of the avatar.
+        # We only map downward movement (crouching), jumping is physics-driven.
+        # If user crouches, hip_y > neutral_hip_y. Avatar world Y goes negative.
+        hip_y_offset = max(0.0, hip_y - self.neutral_hip_y)
+        hip_y_world  = -hip_y_offset * self.cfg.HIP_X_WORLD_SCALE * 1.5
 
         # ── Walking: anti-phase ankle oscillation ─────────────────────────────
         is_walking, osc_amp = self._ankles_alternating()
@@ -243,6 +257,7 @@ class PoseActionDetector:
         return {
             'rotation_delta':  float(rotation_delta),
             'hip_x_world':     float(hip_x_world),
+            'hip_y_world':     float(hip_y_world),
             'is_walking':      bool(is_walking),
             'walk_speed':      float(walk_speed),
             'walk_direction':  int(walk_direction),
@@ -291,6 +306,7 @@ class PoseActionDetector:
         ls_y = avg(L_SHOULDER, 'y');  rs_y = avg(R_SHOULDER, 'y')
         lh_x = avg(L_HIP, 'x');       rh_x = avg(R_HIP, 'x')
         lh_y = avg(L_HIP, 'y');       rh_y = avg(R_HIP, 'y')
+        la_y = avg(L_ANKLE, 'y');     ra_y = avg(R_ANKLE, 'y')
         nose_y = avg(NOSE, 'y')
 
         self.neutral_shoulder_width = abs(rs_x - ls_x)
@@ -298,6 +314,7 @@ class PoseActionDetector:
         self.neutral_shoulder_x     = (ls_x + rs_x) / 2
         self.neutral_hip_y          = (lh_y + rh_y) / 2
         self.neutral_hip_x          = (lh_x + rh_x) / 2
+        self.neutral_ankle_y        = (la_y + ra_y) / 2
         self.neutral_torso_length   = max(self.neutral_hip_y - self.neutral_shoulder_y, 0.01)
         self.neutral_nose_hip_dy    = nose_y - self.neutral_hip_y
 
@@ -342,7 +359,21 @@ class PoseActionDetector:
         if len(self._hip_y_buf) >= self.cfg.JUMP_VOTE_WINDOW:
             recent   = list(self._hip_y_buf)[-self.cfg.JUMP_VOTE_WINDOW:]
             hip_rise = (recent[0] - recent[-1]) / torso
-            is_jump  = hip_rise > self.cfg.JUMP_HIP_RISE_RATIO
+            
+            # To prevent standing up from a crouch from triggering a jump:
+            # 1. Hip must rise fast enough.
+            # 2. Hip must clear neutral standing height.
+            # 3. Ankles must lift off the ground (if visible).
+            is_above_neutral = hip_y < (self.neutral_hip_y - 0.05 * torso)
+            
+            ankle_y = (lm[L_ANKLE]['y'] + lm[R_ANKLE]['y']) / 2
+            # Require ankles to be at least 15% torso above their resting floor position.
+            ankles_lifted = ankle_y < (self.neutral_ankle_y - 0.15 * torso)
+            
+            # We use JUMP_HIP_RISE_RATIO = 0.25 to prevent explosive stand-ups
+            is_fast_enough = hip_rise > 0.25
+            
+            is_jump = is_fast_enough and is_above_neutral and ankles_lifted
         self._votes[ActionType.JUMP].append(int(is_jump))
 
         # --- DEBUG JUMP ---
