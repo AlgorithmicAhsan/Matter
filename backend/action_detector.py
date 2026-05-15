@@ -51,13 +51,13 @@ class DetectorConfig:
 
     # Temporal voting windows (frames) — only used for CROUCH / JUMP
     VOTE_WINDOW                = 8       # majority = > window//2 + 1
-    JUMP_VOTE_WINDOW           = 15      # 15-frame window; jump needs only 1 positive vote
+    JUMP_VOTE_WINDOW           = 4       # 4-frame window; jump needs only 1 positive vote
 
     # -- Crouch ---------------------------------------------------------------
     CROUCH_HIP_DROP_RATIO      = 0.13    # drop > 13% of torso length -> crouch
 
     # -- Jump -----------------------------------------------------------------
-    JUMP_HIP_RISE_RATIO        = 0.02    # hip rises > 2% of torso in window
+    JUMP_HIP_RISE_RATIO        = 0.15    # hip rises > 15% of torso in <=4 frames
     JUMP_COOLDOWN_FRAMES       = 25      # frames to suppress repeat jumps
 
     # -- Rotation (shoulder angle delta) --------------------------------------
@@ -338,11 +338,17 @@ class PoseActionDetector:
 
         # -- JUMP -------------------------------------------------------------
         is_jump = False
+        hip_rise = 0.0
         if len(self._hip_y_buf) >= self.cfg.JUMP_VOTE_WINDOW:
             recent   = list(self._hip_y_buf)[-self.cfg.JUMP_VOTE_WINDOW:]
             hip_rise = (recent[0] - recent[-1]) / torso
             is_jump  = hip_rise > self.cfg.JUMP_HIP_RISE_RATIO
         self._votes[ActionType.JUMP].append(int(is_jump))
+
+        # --- DEBUG JUMP ---
+        print(f"[DEBUG JUMP] Frame Buf: {len(self._hip_y_buf)}/{self.cfg.JUMP_VOTE_WINDOW} | "
+              f"Current Hip Y: {hip_y:.4f} | Rise Ratio: {hip_rise:.4f} (Threshold: {self.cfg.JUMP_HIP_RISE_RATIO}) | "
+              f"Vote Cast: {is_jump}")
 
     # =========================================================================
     # Vote tallying

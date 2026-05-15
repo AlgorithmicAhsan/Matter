@@ -629,16 +629,18 @@ class PosiSimApp {
             this.actionCtrl.applyPoseTransform(data.pose_transform);
         }
 
-        // Discrete actions (CROUCH / JUMP) still come through active_actions
+        // CROUCH is a held state — sync from active_actions
         if (data.pose_mode && data.avatar && data.avatar.active_actions) {
-            const DISCRETE = new Set(['crouch', 'jump']);
-            for (const action of DISCRETE) {
-                if (data.avatar.active_actions.includes(action)) {
-                    this.actionCtrl.activate(action);
-                } else {
-                    this.actionCtrl.deactivate(action);
-                }
+            if (data.avatar.active_actions.includes('crouch')) {
+                this.actionCtrl.activate('crouch');
+            } else {
+                this.actionCtrl.deactivate('crouch');
             }
+        }
+        // JUMP is a one-shot event — fire from detected_actions, never deactivate here
+        // The frontend ActionController.update() handles deactivation itself after processing
+        if (data.pose_mode && data.detected_actions && data.detected_actions.includes('jump')) {
+            this.actionCtrl.activate('jump');
         }
 
         // Update calibration bar

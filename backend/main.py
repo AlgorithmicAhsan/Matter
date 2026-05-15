@@ -101,7 +101,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
 
             landmarks, annotated = state.extractor.process_frame(frame)
+            
+            # --- DEBUG LOGS BEFORE UNCERTAINTY ---
+            print(f"--- FRAME {state.frame_count + 1} ---")
+            if landmarks and len(landmarks) > 24:
+                hip_y = (landmarks[23]['y'] + landmarks[24]['y']) / 2
+                print(f"[DEBUG MAIN] Raw Landmarks - Hip Y: {hip_y:.4f}")
+            else:
+                print(f"[DEBUG MAIN] Raw Landmarks - Invalid or None")
+
             uncertainty_result   = state.scorer.score(landmarks)
+            
+            # --- DEBUG LOGS AFTER UNCERTAINTY ---
+            print(f"[DEBUG MAIN] Uncertainty Trusted: {uncertainty_result['trusted']} | Total Uncertainty: {uncertainty_result['total']:.4f}")
+            
             state.last_landmarks = landmarks
             state.frame_count   += 1
 
@@ -111,6 +124,7 @@ async def websocket_endpoint(websocket: WebSocket):
             state._last_update_time = now
 
             pose_transform = None
+            detected = []
             if state.pose_mode:
                 # Discrete: CROUCH / JUMP only - calibration happens inside if not yet done
                 detected = state.pose_detector.detect_actions(landmarks)
@@ -145,6 +159,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "landmarks":      landmarks if landmarks else None,
                 "pose_transform":  pose_transform,
                 "avatar":         state.action_ctrl.get_state_dict(),
+                "detected_actions": [a.value for a in detected],
                 # Calibration state for the frontend UI
                 "pose_mode":      state.pose_mode,
                 "calibrated":     state.pose_detector.is_calibrated(),
