@@ -3,6 +3,7 @@ import cv2
 import json
 import os
 import time
+import base64
 from pathlib import Path
 
 import numpy as np
@@ -123,7 +124,6 @@ async def websocket_endpoint(websocket: WebSocket):
             state.action_ctrl.rotation += rotation_delta
 
             # ── Encode frame ─────────────────────────────────────────────────
-            import base64
             _, buffer    = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
             frame_base64 = base64.b64encode(buffer).decode("utf-8")
 

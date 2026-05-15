@@ -287,7 +287,8 @@ class KeyboardController {
     }
 
     _onKeyUp(e) {
-        if (this.ctrl.poseMode) return;   // ← Skip keyboard input in pose mode
+        // NOTE: do NOT guard keyUp with poseMode — always let key releases through
+        // to prevent stuck actions when switching modes while holding a key
         const key = e.key.toLowerCase();
         this.pressedKeys.delete(key);
 
@@ -296,6 +297,14 @@ class KeyboardController {
             this.ctrl.deactivate(action);
             if (this.onKeyChange) this.onKeyChange(key, false);
         }
+    }
+
+    clearKeys() {
+        for (const key of this.pressedKeys) {
+            const action = this.bindings[key];
+            if (action) this.ctrl.deactivate(action);
+        }
+        this.pressedKeys.clear();
     }
 
     destroy() {

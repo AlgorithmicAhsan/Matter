@@ -21,103 +21,102 @@ LANDMARK_INDICES = {
     "RightFoot":    (28,),      # right ankle
 }
 
-# BVH skeleton hierarchy as a string template
 BVH_HIERARCHY = """HIERARCHY
 ROOT Hips
-{{
+{
     OFFSET 0.00 0.00 0.00
     CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
     JOINT Spine
-    {{
+    {
         OFFSET 0.00 10.00 0.00
         CHANNELS 3 Zrotation Xrotation Yrotation
         JOINT Neck
-        {{
+        {
             OFFSET 0.00 10.00 0.00
             CHANNELS 3 Zrotation Xrotation Yrotation
             End Site
-            {{
+            {
                 OFFSET 0.00 5.00 0.00
-            }}
-        }}
-    }}
+            }
+        }
+    }
     JOINT LeftArm
-    {{
+    {
         OFFSET -5.00 8.00 0.00
         CHANNELS 3 Zrotation Xrotation Yrotation
         JOINT LeftForeArm
-        {{
+        {
             OFFSET -8.00 0.00 0.00
             CHANNELS 3 Zrotation Xrotation Yrotation
             JOINT LeftHand
-            {{
+            {
                 OFFSET -8.00 0.00 0.00
                 CHANNELS 3 Zrotation Xrotation Yrotation
                 End Site
-                {{
+                {
                     OFFSET -4.00 0.00 0.00
-                }}
-            }}
-        }}
-    }}
+                }
+            }
+        }
+    }
     JOINT RightArm
-    {{
+    {
         OFFSET 5.00 8.00 0.00
         CHANNELS 3 Zrotation Xrotation Yrotation
         JOINT RightForeArm
-        {{
+        {
             OFFSET 8.00 0.00 0.00
             CHANNELS 3 Zrotation Xrotation Yrotation
             JOINT RightHand
-            {{
+            {
                 OFFSET 8.00 0.00 0.00
                 CHANNELS 3 Zrotation Xrotation Yrotation
                 End Site
-                {{
+                {
                     OFFSET 4.00 0.00 0.00
-                }}
-            }}
-        }}
-    }}
+                }
+            }
+        }
+    }
     JOINT LeftUpLeg
-    {{
+    {
         OFFSET -4.00 0.00 0.00
         CHANNELS 3 Zrotation Xrotation Yrotation
         JOINT LeftLeg
-        {{
+        {
             OFFSET 0.00 -10.00 0.00
             CHANNELS 3 Zrotation Xrotation Yrotation
             JOINT LeftFoot
-            {{
+            {
                 OFFSET 0.00 -10.00 0.00
                 CHANNELS 3 Zrotation Xrotation Yrotation
                 End Site
-                {{
+                {
                     OFFSET 0.00 -4.00 0.00
-                }}
-            }}
-        }}
-    }}
+                }
+            }
+        }
+    }
     JOINT RightUpLeg
-    {{
+    {
         OFFSET 4.00 0.00 0.00
         CHANNELS 3 Zrotation Xrotation Yrotation
         JOINT RightLeg
-        {{
+        {
             OFFSET 0.00 -10.00 0.00
             CHANNELS 3 Zrotation Xrotation Yrotation
             JOINT RightFoot
-            {{
+            {
                 OFFSET 0.00 -10.00 0.00
                 CHANNELS 3 Zrotation Xrotation Yrotation
                 End Site
-                {{
+                {
                     OFFSET 0.00 -4.00 0.00
-                }}
-            }}
-        }}
-    }}
-}}
+                }
+            }
+        }
+    }
+}
 """
 
 # Order of joints in the motion data (must match hierarchy above)

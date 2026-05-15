@@ -421,6 +421,7 @@
             <div>
                 <div class="section-title">Pose Control</div>
                 <button id="pose-mode-btn">🎥 Pose OFF</button>
+                <button id="translation-mode-btn" title="Toggle between live landmark translation and gesture control">🎯 Direct Translation</button>
                 <div id="calib-bar-wrap">
                     <div id="calib-label">Stand still — calibrating 0%</div>
                     <div id="calib-bar-track">
@@ -542,6 +543,22 @@ class PosiSimApp {
             if (!this.avatar) {
                 this.avatar = new AvatarRenderer('3d-canvas');
                 document.getElementById('loading-overlay').style.display = 'flex';
+                
+                let currentTranslationMode = 'direct';
+                const translationModeBtn = document.getElementById('translation-mode-btn');
+                if (translationModeBtn) {
+                    translationModeBtn.addEventListener('click', () => {
+                        currentTranslationMode = currentTranslationMode === 'direct' ? 'gesture' : 'direct';
+                        this.avatar.setTranslationMode(currentTranslationMode);
+                        translationModeBtn.textContent = currentTranslationMode === 'direct'
+                            ? '🎯 Direct Translation'
+                            : '🕹️ Gesture Control';
+                        // Clear any stuck keyboard actions when switching modes
+                        if (this.keyboardCtrl) {
+                            this.keyboardCtrl.clearKeys();
+                        }
+                    });
+                }
             }
 
             // Wire keyboard → action controller → WS notification

@@ -51,9 +51,9 @@ class UncertaintyUI {
     }
 
     getColorForValue(value) {
-        if (value < 0.2) {
+        if (value < 0.4) {
             return 'linear-gradient(90deg, #00ff88, #00dd77)';
-        } else if (value < 0.35) {
+        } else if (value < 0.65) {
             return 'linear-gradient(90deg, #ffcc00, #ffaa00)';
         } else {
             return 'linear-gradient(90deg, #ff5555, #ff3232)';
@@ -140,7 +140,7 @@ class UncertaintyUI {
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        const thresholdY = height - (0.3 * height);
+        const thresholdY = height - (0.7 * height);
         ctx.moveTo(0, thresholdY);
         ctx.lineTo(width, thresholdY);
         ctx.stroke();
@@ -151,7 +151,7 @@ class UncertaintyUI {
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
-        ctx.fillText('threshold (0.3)', width - 4, thresholdY - 2);
+        ctx.fillText('threshold (0.7)', width - 4, thresholdY - 2);
     }
 
     drawGrid(ctx, width, height) {

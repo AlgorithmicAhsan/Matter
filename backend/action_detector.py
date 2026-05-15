@@ -51,13 +51,13 @@ class DetectorConfig:
 
     # Temporal voting windows (frames) — only used for CROUCH / JUMP
     VOTE_WINDOW                = 8       # majority = > window//2 + 1
-    JUMP_VOTE_WINDOW           = 4       # 4-frame window; jump needs only 1 positive vote
+    JUMP_VOTE_WINDOW           = 15      # 15-frame window; jump needs only 1 positive vote
 
     # -- Crouch ---------------------------------------------------------------
     CROUCH_HIP_DROP_RATIO      = 0.13    # drop > 13% of torso length -> crouch
 
     # -- Jump -----------------------------------------------------------------
-    JUMP_HIP_RISE_RATIO        = 0.04    # hip rises > 4% of torso in <=4 frames
+    JUMP_HIP_RISE_RATIO        = 0.02    # hip rises > 2% of torso in window
     JUMP_COOLDOWN_FRAMES       = 25      # frames to suppress repeat jumps
 
     # -- Rotation (shoulder angle delta) --------------------------------------
