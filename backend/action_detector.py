@@ -58,7 +58,7 @@ class DetectorConfig:
 
     # -- Jump -----------------------------------------------------------------
     JUMP_HIP_RISE_RATIO        = 0.15    # hip rises > 15% of torso in <=4 frames
-    JUMP_COOLDOWN_FRAMES       = 25      # frames to suppress repeat jumps
+    JUMP_COOLDOWN_FRAMES       = 15      # frames to suppress repeat jumps (~0.5s at 30fps)
 
     # -- Rotation (shoulder angle delta) --------------------------------------
     ROTATION_EMA               = 0.20    # EMA smoothing: lower = smoother, more lag
@@ -170,6 +170,9 @@ class PoseActionDetector:
             active.discard(ActionType.JUMP)
         elif ActionType.JUMP in active:
             self._jump_cooldown = self.cfg.JUMP_COOLDOWN_FRAMES
+            # Flush the rotation EMA so accumulated z-wobble during the jump
+            # doesn't bleed into post-landing rotation.
+            self._smooth_rotation_delta = 0.0
 
         return list(active) if active else [ActionType.IDLE]
 
@@ -208,11 +211,13 @@ class PoseActionDetector:
             if raw_delta >  math.pi: raw_delta -= 2 * math.pi
             if raw_delta < -math.pi: raw_delta += 2 * math.pi
             
-            # Prevent 360 spin glitch ONLY during jumps
-            if self._jump_cooldown > 0 and abs(raw_delta) > 1.0:
+            # Suppress ALL rotation during jump cooldown — not just large spikes.
+            # Small z-axis wobbles during a jump accumulate in the EMA and cause
+            # a persistent rotation offset after landing.
+            if self._jump_cooldown > 0:
                 raw_delta = 0.0
-                current_angle = self._prev_shoulder_angle
-                
+                current_angle = self._prev_shoulder_angle  # hold ref, don't advance
+
             self._prev_shoulder_angle = current_angle
 
         # EMA smooth to remove z-axis noise while preserving intentional turns
