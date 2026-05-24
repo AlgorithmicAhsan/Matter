@@ -16,6 +16,7 @@
             --cyan:      #00d4ff;
             --green:     #00ff88;
             --orange:    #ff7043;
+            --purple:    #a855f7;
             --red:       #ff3232;
             --text:      #c8d0e0;
             --muted:     #4a5068;
@@ -44,26 +45,86 @@
 
         #canvas-panel {
             flex: 1;
+            display: flex;          /* side-by-side children */
+            flex-direction: row;
             position: relative;
             border-radius: 10px;
             overflow: hidden;
             border: 1px solid var(--border);
             min-width: 0;
         }
-
         #canvas-panel canvas { display: block; width: 100%; height: 100%; }
+
+        /* 3D canvas — takes remaining width */
+        #3d-canvas {
+            flex: 1;
+            min-width: 0;
+            height: 100%;
+        }
 
         /* ── Dashboard ── */
         #dashboard-panel {
-            width: 300px;
+            width: 290px;
             background: var(--panel);
             border: 1px solid var(--border);
             border-radius: 10px;
             display: flex;
             flex-direction: column;
-            padding: 16px;
-            gap: 18px;
+            overflow: hidden;
+        }
+
+        /* Top: mode tabs */
+        #mode-header {
+            padding: 12px 14px 0;
+            flex-shrink: 0;
+        }
+        #mode-tabs {
+            display: flex;
+            gap: 4px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 3px;
+        }
+        .mode-tab {
+            flex: 1;
+            padding: 7px 4px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: .3px;
+            text-transform: uppercase;
+            transition: all .18s;
+            font-family: var(--font);
+        }
+        .mode-tab:hover { color: var(--text); background: rgba(255,255,255,.05); }
+        .mode-tab.active[data-mode="live"]    { background: rgba(0,212,255,.15); color: var(--cyan); box-shadow: 0 0 8px rgba(0,212,255,.2); }
+        .mode-tab.active[data-mode="video"]   { background: rgba(168,85,247,.15); color: var(--purple); box-shadow: 0 0 8px rgba(168,85,247,.2); }
+        .mode-tab.active[data-mode="gesture"] { background: rgba(0,255,136,.12); color: var(--green); box-shadow: 0 0 8px rgba(0,255,136,.2); }
+
+        /* Mode indicator strip */
+        #mode-indicator {
+            height: 2px;
+            border-radius: 1px;
+            margin: 10px 14px 0;
+            transition: background .3s;
+        }
+        #mode-indicator.live    { background: linear-gradient(90deg, var(--cyan), transparent); }
+        #mode-indicator.video   { background: linear-gradient(90deg, var(--purple), transparent); }
+        #mode-indicator.gesture { background: linear-gradient(90deg, var(--green), transparent); }
+
+        /* Scrollable body */
+        #dashboard-body {
+            flex: 1;
             overflow-y: auto;
+            padding: 12px 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
         }
 
         .section-title {
@@ -83,59 +144,291 @@
             height: 1px;
             background: var(--border);
         }
+        .section-title.purple { color: var(--purple); }
+        .section-title.green  { color: var(--green); }
 
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        /* ── Mode panels ── */
+        .mode-panel { display: none; }
+        .mode-panel.active { display: contents; }
+
+        /* ── Live mode panel ── */
+        #pose-mode-btn {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0,212,255,.08);
+            color: var(--cyan);
+            border: 1px solid rgba(0,212,255,.25);
+            border-radius: 8px;
             font-size: 12px;
-            margin-bottom: 6px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: .5px;
+            text-transform: uppercase;
+            transition: all .2s;
+            font-family: var(--font);
+            margin-bottom: 8px;
+        }
+        #pose-mode-btn.active {
+            background: rgba(0,255,136,.12);
+            color: var(--green);
+            border-color: rgba(0,255,136,.4);
+            box-shadow: 0 0 10px rgba(0,255,136,.25);
+        }
+        #calib-bar-wrap { display: none; margin-top: 4px; }
+        #calib-label {
+            font-size: 10px; color: var(--muted);
+            margin-bottom: 5px; font-family: var(--mono);
+        }
+        #calib-bar-track {
+            height: 5px;
+            background: rgba(255,255,255,.05);
+            border-radius: 3px; overflow: hidden;
+        }
+        #calib-bar-fill {
+            height: 100%; width: 0%;
+            background: var(--cyan);
+            border-radius: 3px;
+            transition: width .3s;
+        }
+
+        /* ── Video mode panel ── */
+        #video-upload-zone {
+            border: 1.5px dashed rgba(168,85,247,.4);
+            border-radius: 10px;
+            padding: 20px 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all .2s;
+            background: rgba(168,85,247,.04);
+        }
+        #video-upload-zone:hover,
+        #video-upload-zone.drag-over {
+            border-color: var(--purple);
+            background: rgba(168,85,247,.1);
+        }
+        #video-upload-zone .upload-icon { font-size: 28px; margin-bottom: 8px; }
+        #video-upload-zone .upload-text {
+            font-size: 12px; font-weight: 600; color: var(--purple);
+        }
+        #video-upload-zone .upload-hint {
+            font-size: 10px; color: var(--muted); margin-top: 4px;
+        }
+
+        #video-info-box {
+            display: none;
+            background: rgba(168,85,247,.06);
+            border: 1px solid rgba(168,85,247,.2);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 11px;
+        }
+        #video-info-box .vinfo-name {
+            font-weight: 700; color: var(--purple); margin-bottom: 6px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        #video-info-box .vinfo-row {
+            display: flex; justify-content: space-between;
+            color: var(--muted); font-family: var(--mono); font-size: 10px;
+            margin-top: 3px;
+        }
+        #video-info-box .vinfo-row span:last-child { color: var(--text); }
+
+        #video-processing {
+            display: none;
+            text-align: center;
+            padding: 14px;
+        }
+        #video-processing .proc-spinner {
+            width: 28px; height: 28px;
+            border: 2px solid var(--border);
+            border-top-color: var(--purple);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            margin: 0 auto 10px;
+        }
+        #video-processing .proc-text {
+            font-size: 11px; color: var(--purple); font-family: var(--mono);
+        }
+        #video-proc-bar-track {
+            height: 4px; background: rgba(255,255,255,.05);
+            border-radius: 3px; overflow: hidden; margin-top: 8px;
+        }
+        #video-proc-bar-fill {
+            height: 100%; width: 0%; background: var(--purple);
+            border-radius: 3px; transition: width .4s;
+        }
+
+        #video-playback-controls {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Scrubber */
+        #video-scrubber {
+            width: 100%;
+            -webkit-appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(168,85,247,.2);
+            outline: none;
+            cursor: pointer;
+        }
+        #video-scrubber::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: var(--purple);
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(168,85,247,.6);
+        }
+
+        .playback-row {
+            display: flex; gap: 6px; align-items: center;
+        }
+        .play-btn {
+            flex: 1; padding: 8px;
+            background: rgba(168,85,247,.15);
+            color: var(--purple);
+            border: 1px solid rgba(168,85,247,.35);
+            border-radius: 7px;
+            font-size: 13px; cursor: pointer;
+            transition: all .2s;
+            font-family: var(--font);
+            font-weight: 700;
+        }
+        .play-btn:hover { background: rgba(168,85,247,.28); }
+        .play-btn.playing {
+            background: rgba(168,85,247,.25);
+            box-shadow: 0 0 8px rgba(168,85,247,.3);
+        }
+
+        .speed-btn {
+            padding: 7px 9px;
+            background: rgba(255,255,255,.04);
+            color: var(--muted);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 10px; font-weight: 700;
+            cursor: pointer; transition: all .15s;
+            font-family: var(--mono);
+        }
+        .speed-btn:hover { color: var(--text); border-color: rgba(168,85,247,.4); }
+        .speed-btn.active { color: var(--purple); border-color: rgba(168,85,247,.5); background: rgba(168,85,247,.1); }
+
+        #video-frame-readout {
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--muted);
+            text-align: center;
+        }
+        #video-frame-readout span { color: var(--purple); }
+
+        .loop-toggle {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 11px; color: var(--muted); cursor: pointer;
+        }
+        .loop-toggle input[type=checkbox] { accent-color: var(--purple); }
+
+        /* Change video button */
+        #change-video-btn {
+            width: 100%; padding: 7px;
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 11px; cursor: pointer;
+            transition: all .15s;
+            font-family: var(--font);
+            font-weight: 600;
+        }
+        #change-video-btn:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+
+        /* ── Gesture mode panel ── */
+        .gesture-info {
+            background: rgba(0,255,136,.04);
+            border: 1px solid rgba(0,255,136,.15);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+        .gesture-info strong { color: var(--green); }
+
+        #gesture-pose-btn {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0,255,136,.08);
+            color: var(--green);
+            border: 1px solid rgba(0,255,136,.25);
+            border-radius: 8px;
+            font-size: 12px; font-weight: 700;
+            cursor: pointer;
+            letter-spacing: .5px;
+            text-transform: uppercase;
+            transition: all .2s;
+            font-family: var(--font);
+            margin-bottom: 8px;
+        }
+        #gesture-pose-btn.active {
+            background: rgba(0,255,136,.18);
+            border-color: var(--green);
+            box-shadow: 0 0 10px rgba(0,255,136,.25);
+        }
+
+        .coming-soon-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--orange);
+            border: 1px solid rgba(255,112,67,.4);
+            border-radius: 4px;
+            padding: 2px 6px;
+            text-transform: uppercase;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        /* ── Shared panel items ── */
+        .stat-row {
+            display: flex; justify-content: space-between;
+            align-items: center; font-size: 12px; margin-bottom: 6px;
         }
         .stat-label { color: var(--muted); }
         .stat-value { color: var(--cyan); font-family: var(--mono); font-weight: 600; }
 
-        /* Position readout */
         #pos-readout {
-            font-family: var(--mono);
-            font-size: 11px;
+            font-family: var(--mono); font-size: 11px;
             color: var(--green);
             background: rgba(0,255,136,.05);
             border: 1px solid rgba(0,255,136,.15);
             border-radius: 6px;
-            padding: 8px 10px;
-            line-height: 1.8;
+            padding: 8px 10px; line-height: 1.8;
         }
 
-        /* Action state badge */
         #action-state {
-            text-align: center;
-            padding: 8px;
-            border-radius: 6px;
-            font-weight: 700;
-            font-size: 12px;
-            letter-spacing: 1px;
+            text-align: center; padding: 8px;
+            border-radius: 6px; font-weight: 700;
+            font-size: 12px; letter-spacing: 1px;
             text-transform: uppercase;
             background: rgba(0,212,255,.08);
             border: 1px solid rgba(0,212,255,.2);
-            color: var(--cyan);
-            transition: all .2s;
+            color: var(--cyan); transition: all .2s;
         }
-        #action-state.running { background: rgba(0,255,136,.1); border-color: var(--green); color: var(--green); }
+        #action-state.running   { background: rgba(0,255,136,.1); border-color: var(--green); color: var(--green); }
         #action-state.crouching { background: rgba(255,112,67,.1); border-color: var(--orange); color: var(--orange); }
-        #action-state.jumping { background: rgba(255,50,50,.1); border-color: var(--red); color: var(--red); }
+        #action-state.jumping   { background: rgba(255,50,50,.1); border-color: var(--red); color: var(--red); }
 
-        /* Uncertainty bars */
         .bar-wrap { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
         .bar-label { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
         .bar-track { height: 6px; background: rgba(255,255,255,.05); border-radius: 3px; overflow: hidden; }
-        .bar-fill { height: 100%; border-radius: 3px; transition: width .3s, background .3s; }
+        .bar-fill   { height: 100%; border-radius: 3px; transition: width .3s, background .3s; }
 
         #trust-badge {
-            padding: 8px;
-            border-radius: 6px;
-            text-align: center;
-            font-weight: 700;
-            font-size: 12px;
+            padding: 8px; border-radius: 6px; text-align: center;
+            font-weight: 700; font-size: 12px;
             animation: pulse 2s ease-in-out infinite;
         }
         #trust-badge.trusted   { background: rgba(0,255,136,.1); color: var(--green); border: 1px solid var(--green); }
@@ -144,126 +437,116 @@
         @keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:.65 } }
 
         #uncertainty-graph {
-            width: 100%; height: 100px;
+            width: 100%; height: 90px;
             background: rgba(0,212,255,.03);
             border: 1px solid var(--border);
             border-radius: 4px;
         }
 
-        /* ── Pose Mode button ── */
-        #pose-mode-btn {
-            background: rgba(0,212,255,.1);
-            color: var(--cyan);
-            border: 1px solid rgba(0,212,255,.3);
-            padding: 8px 18px;
-        }
-        #pose-mode-btn.active {
-            background: rgba(0,255,136,.15);
-            color: var(--green);
-            border-color: var(--green);
-            box-shadow: 0 0 10px rgba(0,255,136,.3);
-        }
-        /* ── Calibration bar ── */
-        #calib-bar-wrap {
-            display: none;
-            margin-top: 8px;
-        }
-        #calib-label {
-            font-size: 10px;
-            color: var(--muted);
-            margin-bottom: 4px;
-            font-family: var(--mono);
-        }
-        #calib-bar-track {
-            height: 6px;
-            background: rgba(255,255,255,.05);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        #calib-bar-fill {
-            height: 100%;
-            width: 0%;
-            background: var(--cyan);
-            border-radius: 3px;
-            transition: width .3s;
-        }
-
-        /* ── WASD Keyboard HUD ── */
+        /* ── Canvas HUDs ── */
         #keyboard-hud {
-            position: absolute;
-            bottom: 16px;
-            left: 16px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            pointer-events: none;
-            user-select: none;
-            z-index: 10;
+            position: absolute; bottom: 16px; left: 16px;
+            display: flex; flex-direction: column;
+            align-items: center; gap: 4px;
+            pointer-events: none; user-select: none; z-index: 10;
         }
-
         .key-row { display: flex; gap: 4px; }
-
         .key {
             width: 36px; height: 36px;
             background: rgba(10,10,20,.75);
             border: 1px solid rgba(0,212,255,.2);
             border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: var(--mono);
-            font-size: 11px;
-            font-weight: 600;
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--mono); font-size: 11px; font-weight: 600;
             color: rgba(0,212,255,.5);
-            backdrop-filter: blur(6px);
-            transition: all .08s;
+            backdrop-filter: blur(6px); transition: all .08s;
         }
         .key.wide { width: 58px; }
         .key.active {
-            background: rgba(0,212,255,.18);
-            border-color: var(--cyan);
-            color: var(--cyan);
-            box-shadow: 0 0 10px rgba(0,212,255,.4);
+            background: rgba(0,212,255,.18); border-color: var(--cyan);
+            color: var(--cyan); box-shadow: 0 0 10px rgba(0,212,255,.4);
         }
+        .key-hint { font-size: 9px; color: var(--muted); margin-top: 2px; text-align: center; font-family: var(--mono); }
 
-        .key-hint {
-            font-size: 9px;
-            color: var(--muted);
-            margin-top: 2px;
-            text-align: center;
-            font-family: var(--mono);
+        /* ── Video preview panel ── */
+        #video-preview-panel {
+            flex: 1;                /* takes equal share in 'both' mode */
+            min-width: 0;
+            height: 100%;
+            background: #000;
+            display: none;          /* hidden until video loaded */
+            border-left: 1px solid var(--border);
+            position: relative;     /* for skeleton overlay */
         }
-
-        /* ── Extra HUD overlays ── */
-        #speed-hud {
+        #video-preview-panel video {
+            width: 100%; height: 100%;
+            object-fit: contain;
+        }
+        #skeleton-overlay {
             position: absolute;
-            bottom: 16px;
-            right: 16px;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        /* View toggle buttons — on canvas top-right */
+        #view-toggle {
+            position: absolute;
+            top: 14px; right: 14px;
+            display: none;
+            gap: 4px;
+            z-index: 10;
+        }
+        #view-toggle.show { display: flex; }
+        .view-btn {
+            padding: 5px 10px;
+            background: rgba(10,10,20,.8);
+            border: 1px solid rgba(168,85,247,.3);
+            border-radius: 6px;
+            color: var(--muted);
+            font-size: 10px; font-weight: 700;
+            cursor: pointer;
+            backdrop-filter: blur(6px);
+            transition: all .15s;
+            font-family: var(--font);
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+        .view-btn:hover { color: var(--purple); border-color: var(--purple); }
+        .view-btn.active { color: var(--purple); border-color: var(--purple); background: rgba(168,85,247,.15); }
+
+        /* Mode badge on canvas */
+        #mode-badge {
+            position: absolute; top: 14px; left: 14px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 11px; font-weight: 700;
+            letter-spacing: .5px; text-transform: uppercase;
+            backdrop-filter: blur(8px);
+            z-index: 10; pointer-events: none;
+            transition: all .3s;
+        }
+        #mode-badge.live    { background: rgba(0,212,255,.15); color: var(--cyan); border: 1px solid rgba(0,212,255,.3); }
+        #mode-badge.video   { background: rgba(168,85,247,.15); color: var(--purple); border: 1px solid rgba(168,85,247,.3); }
+        #mode-badge.gesture { background: rgba(0,255,136,.12); color: var(--green); border: 1px solid rgba(0,255,136,.25); }
+
+        #speed-hud {
+            position: absolute; bottom: 16px; right: 16px;
             background: rgba(10,10,20,.75);
             border: 1px solid rgba(0,212,255,.2);
-            border-radius: 8px;
-            padding: 8px 14px;
+            border-radius: 8px; padding: 8px 14px;
             backdrop-filter: blur(6px);
-            font-family: var(--mono);
-            font-size: 11px;
-            color: var(--cyan);
-            z-index: 10;
-            pointer-events: none;
+            font-family: var(--mono); font-size: 11px; color: var(--cyan);
+            z-index: 10; pointer-events: none;
         }
         #speed-hud .hud-val { font-size: 20px; font-weight: 700; color: var(--green); }
 
-        /* ── Loading overlay ── */
+        /* ── Overlays ── */
         #loading-overlay {
-            position: absolute;
-            inset: 0;
+            position: absolute; inset: 0;
             background: rgba(7,7,15,.9);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            gap: 14px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 100; gap: 14px;
         }
         #loading-overlay .spinner {
             width: 48px; height: 48px;
@@ -275,79 +558,64 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         #loading-pct { font-family: var(--mono); color: var(--cyan); font-size: 14px; }
 
-        /* ── Countdown overlay ── */
         #countdown-overlay {
-            position: absolute;
-            inset: 0;
+            position: absolute; inset: 0;
             background: rgba(7,7,15,.85);
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 99;
-            gap: 20px;
+            display: none; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 99; gap: 20px;
         }
         #countdown-overlay.show { display: flex; }
         #countdown-number {
-            font-family: var(--mono);
-            font-size: 120px;
-            font-weight: 700;
-            color: var(--cyan);
-            line-height: 1;
+            font-family: var(--mono); font-size: 120px; font-weight: 700;
+            color: var(--cyan); line-height: 1;
             text-shadow: 0 0 30px rgba(0,212,255,.6);
-            animation: pulse-countdown .3s ease-out;
+            animation: pop .3s ease-out;
         }
-        #countdown-label {
-            font-size: 16px;
-            color: var(--text);
-            letter-spacing: 2px;
-            text-transform: uppercase;
-        }
-        @keyframes pulse-countdown {
-            0% { transform: scale(0.5); opacity: 0; }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); opacity: 1; }
-        }
+        #countdown-label { font-size: 16px; color: var(--text); letter-spacing: 2px; text-transform: uppercase; }
+        @keyframes pop { 0%{transform:scale(.5);opacity:0} 50%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
 
         /* ── Control bar ── */
         #control-bar {
             background: var(--panel);
             border-top: 1px solid var(--border);
-            padding: 10px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 16px;
-            flex-shrink: 0;
+            padding: 9px 14px;
+            display: flex; justify-content: space-between;
+            align-items: center; gap: 12px; flex-shrink: 0;
         }
+        .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
 
-        .btn-group { display: flex; gap: 8px; }
-
-        button {
-            padding: 8px 18px;
-            border: none;
-            border-radius: 6px;
-            font-family: var(--font);
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            letter-spacing: .5px;
-            text-transform: uppercase;
+        button.ctrl-btn {
+            padding: 7px 14px;
+            border: none; border-radius: 6px;
+            font-family: var(--font); font-size: 11px;
+            font-weight: 700; cursor: pointer;
+            letter-spacing: .4px; text-transform: uppercase;
             transition: all .2s;
         }
         #start-btn { background: var(--green); color: #000; }
-        #start-btn:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 0 14px rgba(0,255,136,.5); }
+        #start-btn:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 0 12px rgba(0,255,136,.5); }
         #stop-btn  { background: var(--red);   color: #fff; }
-        #stop-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 14px rgba(255,50,50,.5); }
+        #stop-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 12px rgba(255,50,50,.5); }
         #save-btn  { background: var(--cyan);  color: #000; }
-        #save-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 14px rgba(0,212,255,.5); }
-        button:disabled { opacity: .4; cursor: not-allowed; }
+        #save-btn:hover:not(:disabled)  { filter: brightness(1.1); box-shadow: 0 0 12px rgba(0,212,255,.5); }
+        #recalib-btn {
+            background: rgba(0,212,255,.08); color: var(--cyan);
+            border: 1px solid rgba(0,212,255,.25);
+        }
+        #recalib-btn:hover { background: rgba(0,212,255,.18); }
+        #reset-btn {
+            background: rgba(255,112,67,.1); color: var(--orange);
+            border: 1px solid rgba(255,112,67,.3);
+        }
+        #reset-btn:hover { background: rgba(255,112,67,.22); box-shadow: 0 0 8px rgba(255,112,67,.3); }
+        .ctrl-btn:disabled { opacity: .35; cursor: not-allowed; }
 
-        .status-info { display: flex; gap: 16px; font-size: 11px; align-items: center; }
-        .status-item { display: flex; align-items: center; gap: 6px; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+        .status-info { display: flex; gap: 14px; font-size: 11px; align-items: center; flex-shrink: 0; }
+        .status-item { display: flex; align-items: center; gap: 5px; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
         .dot.on { background: var(--green); box-shadow: 0 0 6px rgba(0,255,136,.8); }
-        .status-text { color: var(--muted); }
+        .status-text { color: var(--muted); white-space: nowrap; }
         .status-value { color: var(--cyan); font-weight: 600; font-family: var(--mono); }
 
         ::-webkit-scrollbar { width: 4px; }
@@ -362,6 +630,22 @@
         <!-- ── 3D Canvas ── -->
         <div id="canvas-panel">
             <div id="3d-canvas" style="width:100%;height:100%;"></div>
+
+            <!-- Mode badge -->
+            <div id="mode-badge" class="live">🎥 Live</div>
+
+            <!-- View toggle (video mode only) -->
+            <div id="view-toggle">
+                <button class="view-btn active" data-view="avatar">Avatar</button>
+                <button class="view-btn" data-view="both">Both</button>
+                <button class="view-btn" data-view="video">Video</button>
+            </div>
+
+            <!-- Video preview panel (shown in video mode) -->
+            <div id="video-preview-panel">
+                <video id="video-preview" muted playsinline></video>
+                <canvas id="skeleton-overlay"></canvas>
+            </div>
 
             <!-- Loading overlay -->
             <div id="loading-overlay">
@@ -393,7 +677,7 @@
                     <div class="key wide" data-key=" ">Space</div>
                     <div class="key wide" data-key="control">Ctrl</div>
                 </div>
-                <div class="key-hint">WASD · Q/E Turn · Space Jump · Shift Sprint · Ctrl Crouch</div>
+                <div class="key-hint">WASD · Q/E Strafe · Space Jump · Shift Sprint · Ctrl Crouch</div>
             </div>
 
             <!-- Speed HUD -->
@@ -406,70 +690,163 @@
         <!-- ── Dashboard ── -->
         <div id="dashboard-panel">
 
-            <div>
-                <div class="section-title">Avatar State</div>
-                <div id="action-state">IDLE</div>
-                <br>
-                <div id="pos-readout">
-                    X: <span id="pos-x">0.0</span><br>
-                    Y: <span id="pos-y">0.0</span><br>
-                    Z: <span id="pos-z">0.0</span><br>
-                    R: <span id="pos-r">0°</span>
+            <!-- Mode tabs -->
+            <div id="mode-header">
+                <div id="mode-tabs">
+                    <button class="mode-tab active" data-mode="live">🎥 Live</button>
+                    <button class="mode-tab" data-mode="video">🎬 Video</button>
+                    <button class="mode-tab" data-mode="gesture">🕹️ Gesture</button>
                 </div>
             </div>
+            <div id="mode-indicator" class="live"></div>
 
-            <div>
-                <div class="section-title">Pose Control</div>
-                <button id="pose-mode-btn">🎥 Pose OFF</button>
-                <button id="translation-mode-btn" title="Toggle between live landmark translation and gesture control">🎯 Direct Translation</button>
-                <div id="calib-bar-wrap">
-                    <div id="calib-label">Stand still — calibrating 0%</div>
-                    <div id="calib-bar-track">
-                        <div id="calib-bar-fill"></div>
+            <!-- Scrollable body -->
+            <div id="dashboard-body">
+
+                <!-- ══ LIVE MODE PANEL ══════════════════════════════════════ -->
+                <div id="panel-live" class="mode-panel active">
+
+                    <div>
+                        <div class="section-title">Live Pose</div>
+                        <button id="pose-mode-btn">🎥 Pose OFF</button>
+                        <div id="calib-bar-wrap">
+                            <div id="calib-label">Stand still — calibrating 0%</div>
+                            <div id="calib-bar-track">
+                                <div id="calib-bar-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ══ VIDEO MODE PANEL ════════════════════════════════════ -->
+                <div id="panel-video" class="mode-panel">
+
+                    <div>
+                        <div class="section-title purple">Video Pose</div>
+
+                        <!-- Upload zone (hidden once video loaded) -->
+                        <div id="video-upload-zone">
+                            <div class="upload-icon">🎬</div>
+                            <div class="upload-text">Upload Video</div>
+                            <div class="upload-hint">MP4 · MOV · AVI · WebM</div>
+                        </div>
+                        <input type="file" id="video-file-input" accept="video/*" style="display:none">
+
+                        <!-- Processing spinner -->
+                        <div id="video-processing">
+                            <div class="proc-spinner"></div>
+                            <div class="proc-text" id="video-proc-text">Extracting poses…</div>
+                            <div id="video-proc-bar-track">
+                                <div id="video-proc-bar-fill"></div>
+                            </div>
+                        </div>
+
+                        <!-- Video info + playback (shown after processing) -->
+                        <div id="video-info-box">
+                            <div class="vinfo-name" id="video-filename">—</div>
+                            <div class="vinfo-row"><span>Frames</span><span id="vinfo-frames">—</span></div>
+                            <div class="vinfo-row"><span>FPS</span><span id="vinfo-fps">—</span></div>
+                            <div class="vinfo-row"><span>Duration</span><span id="vinfo-dur">—</span></div>
+                        </div>
+
+                        <div id="video-playback-controls">
+                            <input type="range" id="video-scrubber" min="0" max="100" value="0">
+                            <div id="video-frame-readout">Frame <span id="vid-cur-frame">0</span> / <span id="vid-total-frames">0</span></div>
+                            <div class="playback-row">
+                                <button class="play-btn" id="video-play-btn">▶ Play</button>
+                                <button class="speed-btn active" data-speed="1">1×</button>
+                                <button class="speed-btn" data-speed="0.5">½×</button>
+                                <button class="speed-btn" data-speed="2">2×</button>
+                            </div>
+                            <label class="loop-toggle">
+                                <input type="checkbox" id="video-loop" checked>
+                                Loop playback
+                            </label>
+                            <button id="change-video-btn">↺ Change Video</button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ══ GESTURE MODE PANEL ══════════════════════════════════ -->
+                <div id="panel-gesture" class="mode-panel">
+
+                    <div>
+                        <div class="section-title green">Gesture Control <span class="coming-soon-badge">Partial</span></div>
+                        <button id="gesture-pose-btn">🕹️ Gesture OFF</button>
+                        <div class="gesture-info" style="margin-top:10px;">
+                            <strong>How it works:</strong><br>
+                            Body movements trigger avatar actions instead of mapping directly to bones.<br><br>
+                            • Lean forward → walk<br>
+                            • Raise both arms → jump<br>
+                            • Bend knees → crouch<br>
+                            • Turn shoulders → rotate
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ══ ALWAYS VISIBLE ══════════════════════════════════════ -->
+
+                <!-- Avatar State -->
+                <div>
+                    <div class="section-title">Avatar State</div>
+                    <div id="action-state">IDLE</div>
+                    <br>
+                    <div id="pos-readout">
+                        X: <span id="pos-x">0.0</span><br>
+                        Y: <span id="pos-y">0.0</span><br>
+                        Z: <span id="pos-z">0.0</span><br>
+                        R: <span id="pos-r">0°</span>
                     </div>
                 </div>
-            </div>
 
-            <div>
-                <div class="section-title">Frame Data</div>
-                <div class="stat-row"><span class="stat-label">Frame</span><span class="stat-value" id="frame-count">0</span></div>
-                <div class="stat-row"><span class="stat-label">BVH Frames</span><span class="stat-value" id="bvh-frames">0</span></div>
-                <div class="stat-row"><span class="stat-label">Skipped</span><span class="stat-value" id="skipped-frames">0</span></div>
-                <div class="stat-row"><span class="stat-label">Coverage</span><span class="stat-value" id="coverage-pct">0%</span></div>
-            </div>
-
-            <div>
-                <div class="section-title">Uncertainty</div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Aleatoric</span><span id="aleatoric-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="aleatoric-bar" style="width:0%"></div></div>
+                <!-- Frame Data -->
+                <div>
+                    <div class="section-title">Frame Data</div>
+                    <div class="stat-row"><span class="stat-label">Frame</span><span class="stat-value" id="frame-count">0</span></div>
+                    <div class="stat-row"><span class="stat-label">BVH Frames</span><span class="stat-value" id="bvh-frames">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Skipped</span><span class="stat-value" id="skipped-frames">0</span></div>
+                    <div class="stat-row"><span class="stat-label">Coverage</span><span class="stat-value" id="coverage-pct">0%</span></div>
                 </div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Epistemic</span><span id="epistemic-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="epistemic-bar" style="width:0%"></div></div>
-                </div>
-                <div class="bar-wrap">
-                    <div class="bar-label"><span>Total</span><span id="total-val">0.000</span></div>
-                    <div class="bar-track"><div class="bar-fill" id="total-bar" style="width:0%"></div></div>
-                </div>
-                <div id="trust-badge" class="trusted">✓ TRUSTED</div>
-            </div>
 
-            <div>
-                <div class="section-title">History</div>
-                <canvas id="uncertainty-graph"></canvas>
-            </div>
+                <!-- Uncertainty -->
+                <div>
+                    <div class="section-title">Uncertainty</div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Aleatoric</span><span id="aleatoric-val">0.000</span></div>
+                        <div class="bar-track"><div class="bar-fill" id="aleatoric-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Epistemic</span><span id="epistemic-val">0.000</span></div>
+                        <div class="bar-track"><div class="bar-fill" id="epistemic-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-label"><span>Total</span><span id="total-val">0.000</span></div>
+                        <div class="bar-track"><div class="bar-fill" id="total-bar" style="width:0%"></div></div>
+                    </div>
+                    <div id="trust-badge" class="trusted">✓ TRUSTED</div>
+                </div>
 
-        </div>
-    </div>
+                <!-- History -->
+                <div>
+                    <div class="section-title">History</div>
+                    <canvas id="uncertainty-graph"></canvas>
+                </div>
+
+            </div><!-- /dashboard-body -->
+        </div><!-- /dashboard-panel -->
+    </div><!-- /main-content -->
 
     <!-- ── Control Bar ── -->
     <div id="control-bar">
         <div class="btn-group">
-            <button id="start-btn">▶ Start Rec</button>
-            <button id="stop-btn" disabled>⏹ Stop</button>
-            <button id="save-btn" disabled>💾 Save BVH</button>
-            <button id="recalib-btn" title="Reset pose calibration">↺ Recalibrate</button>
+            <button class="ctrl-btn" id="start-btn">▶ Record</button>
+            <button class="ctrl-btn" id="stop-btn" disabled>⏹ Stop</button>
+            <button class="ctrl-btn" id="save-btn" disabled>💾 Save BVH</button>
+            <button class="ctrl-btn" id="recalib-btn">↺ Recalibrate</button>
+            <button class="ctrl-btn" id="reset-btn">⌂ Reset View</button>
         </div>
         <div class="status-info">
             <div class="status-item">
@@ -505,31 +882,113 @@ class PosiSimApp {
         this.ui        = null;
         this.recording = false;
 
+        // Current app mode: 'live' | 'video' | 'gesture'
+        this.appMode = 'live';
+
         // FPS counter
         this._frameCount  = 0;
         this._lastFpsTime = Date.now();
 
         // Action system
-        this.actionCtrl  = new ActionController(new ActionConfig());
-        this.keyboardCtrl = null;   // created after avatar is ready
-        this.poseModeCtrl = null;   // created after WS connects
-        this.keyHUD      = new KeyboardHUD();
+        this.actionCtrl   = new ActionController(new ActionConfig());
+        this.keyboardCtrl = null;
+        this.poseModeCtrl = null;
+        this.keyHUD       = new KeyboardHUD();
 
         // Speed estimation
-        this._lastPos    = new THREE.Vector3();
+        this._lastPos     = new THREE.Vector3();
         this._lastPosTime = performance.now();
 
+        // Video playback state
+        this._videoSequence    = [];   // [{landmarks}]
+        this._videoFPS         = 30;
+        this._videoCurrentFrame = 0;
+        this._videoPlaying     = false;
+        this._videoSpeed       = 1.0;
+        this._videoTimer       = null;
+        this._videoLoop        = true;
+        this._videoBlobUrl     = null;  // object URL for the uploaded file
+        this._videoView        = 'avatar'; // 'avatar' | 'both' | 'video'
+
+        // MediaPipe skeleton connections (matches pose.py POSE_CONNECTIONS)
+        this._POSE_CONNECTIONS = [
+            [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],
+            [11,12],[11,13],[13,15],[12,14],[14,16],
+            [11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],
+            [15,17],[15,19],[15,21],[16,18],[16,20],[16,22],
+            [27,29],[27,31],[29,31],[28,30],[28,32],[30,32],
+        ];
+
+        this._setupModeTabs();
         this._setupButtons();
+        this._setupVideoUpload();
+        this._setupViewToggle();
         this._connectWebSocket();
         this._startFPSCounter();
         this._startActionLoop();
     }
 
-    // ── UI ────────────────────────────────────────────────────────────────────
+    // ── Mode tabs ─────────────────────────────────────────────────────────────
+    _setupModeTabs() {
+        document.querySelectorAll('.mode-tab').forEach(btn => {
+            btn.addEventListener('click', () => this._setMode(btn.dataset.mode));
+        });
+    }
+
+    _setMode(mode) {
+        if (this.appMode === mode) return;
+
+        // Stop video if leaving video mode, restore full avatar view
+        if (this.appMode === 'video') {
+            this._videoPause();
+            this._setVideoView('avatar');
+            document.getElementById('view-toggle').classList.remove('show');
+        }
+
+        // Turn off pose if switching away from a pose-active mode
+        if (this.poseModeCtrl && this.poseModeCtrl._poseMode) {
+            this.poseModeCtrl._forceOff();
+        }
+        if (mode === 'gesture' && this.avatar) {
+            this.avatar.setTranslationMode('gesture');
+        } else if (this.avatar) {
+            this.avatar.setTranslationMode('direct');
+        }
+
+        this.appMode = mode;
+
+        // Update tab UI
+        document.querySelectorAll('.mode-tab').forEach(b =>
+            b.classList.toggle('active', b.dataset.mode === mode));
+        document.getElementById('mode-indicator').className = mode;
+
+        // Update canvas badge
+        const badge = document.getElementById('mode-badge');
+        const labels = { live: '🎥 Live', video: '🎬 Video', gesture: '🕹️ Gesture' };
+        badge.textContent = labels[mode];
+        badge.className = `${mode}`;
+
+        // Show/hide mode panels
+        document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById(`panel-${mode}`).classList.add('active');
+
+        // Show/hide keyboard HUD (only in live/gesture mode with keyboard)
+        const kbHud = document.getElementById('keyboard-hud');
+        kbHud.style.display = (mode === 'video') ? 'none' : 'flex';
+    }
+
+    // ── Buttons ───────────────────────────────────────────────────────────────
     _setupButtons() {
-        document.getElementById('start-btn').onclick = () => this._startRecording();
-        document.getElementById('stop-btn').onclick  = () => this._stopRecording();
-        document.getElementById('save-btn').onclick  = () => this._saveBVH();
+        document.getElementById('start-btn').onclick   = () => this._startRecording();
+        document.getElementById('stop-btn').onclick    = () => this._stopRecording();
+        document.getElementById('save-btn').onclick    = () => this._saveBVH();
+        document.getElementById('recalib-btn').onclick = () => this.poseModeCtrl?.resetCalibration();
+        document.getElementById('reset-btn').onclick   = () => this._resetAvatar();
+
+        // Gesture pose btn mirrors pose-mode-btn logic
+        document.getElementById('gesture-pose-btn').addEventListener('click', () => {
+            this.poseModeCtrl && this.poseModeCtrl._toggle();
+        });
     }
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
@@ -539,62 +998,37 @@ class PosiSimApp {
         this.ws.onopen = () => {
             this._setWSStatus('Connected', true);
 
-            // Create 3D avatar + keyboard controller once WS is up
             if (!this.avatar) {
                 this.avatar = new AvatarRenderer('3d-canvas');
                 document.getElementById('loading-overlay').style.display = 'flex';
-                
-                let currentTranslationMode = 'direct';
-                const translationModeBtn = document.getElementById('translation-mode-btn');
-                if (translationModeBtn) {
-                    translationModeBtn.addEventListener('click', () => {
-                        currentTranslationMode = currentTranslationMode === 'direct' ? 'gesture' : 'direct';
-                        this.avatar.setTranslationMode(currentTranslationMode);
-                        translationModeBtn.textContent = currentTranslationMode === 'direct'
-                            ? '🎯 Direct Translation'
-                            : '🕹️ Gesture Control';
-                        // Clear any stuck keyboard actions when switching modes
-                        if (this.keyboardCtrl) {
-                            this.keyboardCtrl.clearKeys();
-                        }
-                    });
-                }
             }
 
-            // Wire keyboard → action controller → WS notification
             if (!this.keyboardCtrl) {
                 this.keyboardCtrl = new KeyboardController(this.actionCtrl, (key, isDown) => {
-                    // Notify backend so it can tag BVH with action context
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({
-                            action: isDown ? 'key_down' : 'key_up',
-                            key
-                        }));
+                    if (this.ws?.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({ action: isDown ? 'key_down' : 'key_up', key }));
                     }
                 });
             }
 
             this.poseModeCtrl = new PoseModeController((msg) => {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN)
+                if (this.ws?.readyState === WebSocket.OPEN)
                     this.ws.send(JSON.stringify(msg));
             });
 
-            document.getElementById('recalib-btn').onclick = () =>
-                this.poseModeCtrl && this.poseModeCtrl.resetCalibration();
-
-            this.ui = new UncertaintyUI();
+            if (!this.ui) this.ui = new UncertaintyUI();
         };
 
         this.ws.onmessage = (e) => {
             try {
                 const data = JSON.parse(e.data);
-                if (data.event)            this._handleEvent(data);
+                if (data.event)             this._handleEvent(data);
                 else if (data.frame != null) this._handleFrame(data);
             } catch (err) { console.error('WS parse error:', err); }
         };
 
-        this.ws.onerror  = () => this._setWSStatus('Error', false);
-        this.ws.onclose  = () => {
+        this.ws.onerror = () => this._setWSStatus('Error', false);
+        this.ws.onclose = () => {
             this._setWSStatus('Disconnected', false);
             setTimeout(() => this._connectWebSocket(), 3000);
         };
@@ -615,44 +1049,41 @@ class PosiSimApp {
 
         if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
-        // Only drive arms from landmarks when pose mode is active
-        if (this.avatar && data.landmarks && data.pose_mode) {
-            this.avatar.updatePose(data.landmarks);
-        }
+        // Only drive pose from live camera when in live or gesture mode
+        if (this.appMode !== 'video') {
+            if (this.avatar && data.landmarks && data.pose_mode) {
+                this.avatar.updatePose(data.landmarks);
+            }
+            this.actionCtrl.poseMode = data.pose_mode ?? false;
 
-        // Sync pose mode flag so keyboard is blocked when pose is active
-        this.actionCtrl.poseMode = data.pose_mode ?? false;
-
-        // Pose transform: rotation delta, X mirroring, walking
-        if (data.pose_mode && data.pose_transform) {
-            console.log('pose_transform:', data.pose_transform);
-            this.actionCtrl.applyPoseTransform(data.pose_transform);
-        }
-
-        // CROUCH is a held state — sync from active_actions
-        if (data.pose_mode && data.avatar && data.avatar.active_actions) {
-            if (data.avatar.active_actions.includes('crouch')) {
-                this.actionCtrl.activate('crouch');
-            } else {
-                this.actionCtrl.deactivate('crouch');
+            if (data.pose_mode && data.pose_transform) {
+                this.actionCtrl.applyPoseTransform(data.pose_transform);
+            }
+            if (data.pose_mode && data.avatar?.active_actions) {
+                data.avatar.active_actions.includes('crouch')
+                    ? this.actionCtrl.activate('crouch')
+                    : this.actionCtrl.deactivate('crouch');
+            }
+            if (data.pose_mode && data.detected_actions?.includes('jump')) {
+                this.actionCtrl.activate('jump');
             }
         }
-        // JUMP is a one-shot event — fire from detected_actions, never deactivate here
-        // The frontend ActionController.update() handles deactivation itself after processing
-        if (data.pose_mode && data.detected_actions && data.detected_actions.includes('jump')) {
-            this.actionCtrl.activate('jump');
-        }
 
-        // Update calibration bar
         if (this.poseModeCtrl) {
             this.poseModeCtrl.onFrame(
-                data.pose_mode     ?? false,
-                data.calibrated    ?? false,
+                data.pose_mode      ?? false,
+                data.calibrated     ?? false,
                 data.calib_progress ?? 0
             );
+            // Mirror state to gesture panel button
+            const gBtn = document.getElementById('gesture-pose-btn');
+            if (gBtn) {
+                const on = data.pose_mode ?? false;
+                gBtn.textContent = on ? '🕹️ Gesture ON' : '🕹️ Gesture OFF';
+                gBtn.classList.toggle('active', on);
+            }
         }
 
-        // Hide loading overlay once first frame arrives
         const overlay = document.getElementById('loading-overlay');
         if (overlay.style.display !== 'none') overlay.style.display = 'none';
     }
@@ -668,54 +1099,416 @@ class PosiSimApp {
                 document.getElementById('save-btn').disabled = true;
                 alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
                 break;
-            case 'pose_mode_changed':
-                console.log('Pose mode:', data.pose_mode);
-                break;
-            case 'calibration_reset':
-                console.log('Calibration reset.');
-                break;
         }
     }
 
-    // ── Action loop (runs at rAF rate, independent of WS) ────────────────────
+    // ── Video upload + playback ───────────────────────────────────────────────
+    _setupVideoUpload() {
+        const zone  = document.getElementById('video-upload-zone');
+        const input = document.getElementById('video-file-input');
+
+        zone.addEventListener('click', () => input.click());
+        input.addEventListener('change', () => {
+            if (input.files[0]) this._processVideo(input.files[0]);
+        });
+
+        // Drag-and-drop
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('video/')) this._processVideo(file);
+        });
+
+        // Playback controls
+        document.getElementById('video-play-btn').addEventListener('click', () => {
+            this._videoPlaying ? this._videoPause() : this._videoPlay();
+        });
+
+        document.getElementById('video-scrubber').addEventListener('input', (e) => {
+            this._videoCurrentFrame = parseInt(e.target.value);
+            this._renderVideoFrame(this._videoCurrentFrame);
+        });
+
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this._videoSpeed = parseFloat(btn.dataset.speed);
+                if (this._videoPlaying) { this._videoPause(); this._videoPlay(); }
+            });
+        });
+
+        document.getElementById('video-loop').addEventListener('change', (e) => {
+            this._videoLoop = e.target.checked;
+        });
+
+        document.getElementById('change-video-btn').addEventListener('click', () => {
+            this._videoReset();
+        });
+    }
+
+    _setupViewToggle() {
+        document.querySelectorAll('.view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this._setVideoView(btn.dataset.view);
+            });
+        });
+    }
+
+    _setVideoView(view) {
+        this._videoView = view;
+        const canvas3d  = document.getElementById('3d-canvas');
+        const preview   = document.getElementById('video-preview-panel');
+
+        if (view === 'avatar') {
+            // Restore 100% width so Three.js canvas fills the panel
+            canvas3d.style.display = 'block';
+            canvas3d.style.flex    = '1';
+            canvas3d.style.width   = '100%';
+            preview.style.display  = 'none';
+        } else if (view === 'both') {
+            // CRITICAL: clear the inline width so flex:1 can share space equally.
+            // Without this, canvas3d keeps width:100% and the video panel gets 0px.
+            canvas3d.style.display = 'block';
+            canvas3d.style.flex    = '1';
+            canvas3d.style.width   = '';   // let flex distribute
+            preview.style.display  = 'block';
+            preview.style.flex     = '1';
+        } else { // video only
+            canvas3d.style.display = 'none';
+            canvas3d.style.width   = '';
+            preview.style.display  = 'block';
+            preview.style.flex     = '1';
+        }
+        // Two-step resize: immediate (catches most cases) + short delay (catches
+        // rare cases where flex reflow hasn't completed yet).
+        if (this.avatar) this.avatar._onWindowResize();
+        setTimeout(() => { if (this.avatar) this.avatar._onWindowResize(); }, 50);
+    }
+
+    _drawSkeleton(landmarks) {
+        const canvas  = document.getElementById('skeleton-overlay');
+        const videoEl = document.getElementById('video-preview');
+        if (!canvas || !landmarks || !videoEl) return;
+
+        const elW = canvas.parentElement.clientWidth;
+        const elH = canvas.parentElement.clientHeight;
+        canvas.width  = elW;
+        canvas.height = elH;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, elW, elH);
+
+        // ── Account for object-fit:contain letterboxing ──────────────────────
+        // The video frame is centered inside the element with black bars on the
+        // sides or top/bottom. Landmarks are normalized to the VIDEO frame (0-1),
+        // so we must map them to the actual rendered video rect, not the element.
+        const vidW = videoEl.videoWidth  || elW;
+        const vidH = videoEl.videoHeight || elH;
+        const elAR  = elW / elH;
+        const vidAR = vidW / vidH;
+
+        let renderW, renderH, offX, offY;
+        if (vidAR > elAR) {
+            // Video wider than element → black bars top/bottom (pillarbox)
+            renderW = elW;
+            renderH = elW / vidAR;
+            offX = 0;
+            offY = (elH - renderH) / 2;
+        } else {
+            // Video taller than element → black bars left/right (letterbox)
+            renderH = elH;
+            renderW = elH * vidAR;
+            offX = (elW - renderW) / 2;
+            offY = 0;
+        }
+
+        const toX = lm => offX + lm.x * renderW;
+        const toY = lm => offY + lm.y * renderH;
+
+        // Draw connections
+        ctx.lineWidth   = 2.5;
+        ctx.strokeStyle = 'rgba(0, 255, 136, 0.8)';
+        for (const [a, b] of this._POSE_CONNECTIONS) {
+            if (!landmarks[a] || !landmarks[b]) continue;
+            if (landmarks[a].visibility < 0.3 || landmarks[b].visibility < 0.3) continue;
+            ctx.beginPath();
+            ctx.moveTo(toX(landmarks[a]), toY(landmarks[a]));
+            ctx.lineTo(toX(landmarks[b]), toY(landmarks[b]));
+            ctx.stroke();
+        }
+        // Draw joints
+        for (const lm of landmarks) {
+            if (!lm || lm.visibility < 0.3) continue;
+            ctx.beginPath();
+            ctx.arc(toX(lm), toY(lm), 5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 212, 255, 0.95)';
+            ctx.fill();
+        }
+    }
+
+    async _processVideo(file) {
+        // Show processing state
+        document.getElementById('video-upload-zone').style.display  = 'none';
+        document.getElementById('video-processing').style.display   = 'block';
+        document.getElementById('video-info-box').style.display     = 'none';
+        document.getElementById('video-playback-controls').style.display = 'none';
+        document.getElementById('video-proc-text').textContent = 'Uploading…';
+        document.getElementById('video-proc-bar-fill').style.width = '10%';
+
+        // Create blob URL for the preview video element
+        if (this._videoBlobUrl) URL.revokeObjectURL(this._videoBlobUrl);
+        this._videoBlobUrl = URL.createObjectURL(file);
+        const videoEl = document.getElementById('video-preview');
+        videoEl.src = this._videoBlobUrl;
+        videoEl.pause();
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Estimate extraction time: ~1.5× the video duration on CPU.
+            // Animate the bar from 10% → 88% over that window so it moves
+            // continuously rather than sitting frozen until the response arrives.
+            const videoEl    = document.getElementById('video-preview');
+            const duration   = (videoEl.duration > 0 ? videoEl.duration : 10); // seconds
+            const estMs      = duration * 1500;   // ~1.5s per second of video
+            const barEl      = document.getElementById('video-proc-bar-fill');
+            const textEl     = document.getElementById('video-proc-text');
+            let   barPct     = 10;
+            barEl.style.transition = 'none';
+            barEl.style.width = '10%';
+            const startTime  = Date.now();
+            const barTimer   = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                // Approach 88% asymptotically so it never quite reaches it
+                barPct = 88 * (1 - Math.exp(-3 * elapsed / estMs));
+                barEl.style.width = barPct.toFixed(1) + '%';
+                const framesEst = Math.round((elapsed / estMs) * duration * 30);
+                textEl.textContent = `Extracting poses… (~${framesEst} frames)`;
+            }, 200);
+
+            const resp = await fetch('/process_video', { method: 'POST', body: formData });
+            clearInterval(barTimer);
+            if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+
+            barEl.style.transition = 'width .3s';
+            barEl.style.width = '95%';
+            textEl.textContent = 'Finalising…';
+
+            const data = await resp.json();
+
+            document.getElementById('video-proc-bar-fill').style.width = '100%';
+
+            this._videoSequence     = data.landmark_sequence;
+            this._videoFPS          = data.fps;
+            this._videoCurrentFrame = 0;
+
+            // Populate info box
+            document.getElementById('video-filename').textContent = file.name;
+            document.getElementById('vinfo-frames').textContent   = data.total_frames;
+            document.getElementById('vinfo-fps').textContent      = data.fps.toFixed(1);
+            const dur = (data.total_frames / data.fps).toFixed(1);
+            document.getElementById('vinfo-dur').textContent      = dur + 's';
+
+            // Setup scrubber
+            const scrubber = document.getElementById('video-scrubber');
+            scrubber.max   = data.total_frames - 1;
+            scrubber.value = 0;
+            document.getElementById('vid-total-frames').textContent = data.total_frames;
+            document.getElementById('vid-cur-frame').textContent    = 0;
+
+            // Show playback UI
+            document.getElementById('video-processing').style.display       = 'none';
+            document.getElementById('video-info-box').style.display         = 'block';
+            document.getElementById('video-playback-controls').style.display = 'flex';
+
+            // Show view toggle
+            document.getElementById('view-toggle').classList.add('show');
+
+        } catch (err) {
+            console.error('Video processing failed:', err);
+            document.getElementById('video-proc-text').textContent = '⚠ Failed: ' + err.message;
+            setTimeout(() => this._videoReset(), 3000);
+        }
+    }
+
+    _videoPlay() {
+        if (!this._videoSequence.length) return;
+
+        // If at the end of the video, restart from frame 0 so re-pressing Play works.
+        if (this._videoCurrentFrame >= this._videoSequence.length - 1) {
+            this._videoCurrentFrame = 0;
+        }
+
+        // Video landmarks are pre-computed and clean — bypass EMA so the avatar
+        // matches the skeleton overlay exactly with no lag.
+        if (this.avatar) this.avatar.setBypassEMA(true);
+
+        this._videoPlaying = true;
+
+        const btn = document.getElementById('video-play-btn');
+        if (btn) { btn.textContent = '⏸ Pause'; btn.classList.add('playing'); }
+
+        // Start the video element — it becomes the master clock.
+        const videoEl = document.getElementById('video-preview');
+        if (videoEl && videoEl.src) {
+            videoEl.playbackRate = this._videoSpeed;
+            videoEl.currentTime  = this._videoCurrentFrame / this._videoFPS;
+            videoEl.play().catch(() => {});
+        }
+
+        // rAF loop: derive current frame from videoEl.currentTime each paint.
+        // This keeps avatar + skeleton perfectly in sync with the media clock —
+        // setInterval drifts and fires too fast, causing the skeleton to run ahead.
+        let lastRenderedIdx = -1;
+        let loopPending = false; // debounce: ignore extra "ended" ticks while seeking to 0
+
+        const tick = () => {
+            if (!this._videoPlaying) return;   // stopped externally
+            this._videoTimer = requestAnimationFrame(tick);
+
+            const videoEl2 = document.getElementById('video-preview');
+
+            // Detect video end via the element's own flag — more reliable than
+            // comparing frame index since seeks are async.
+            if (videoEl2 && videoEl2.ended && !loopPending) {
+                if (this._videoLoop) {
+                    loopPending = true;
+                    videoEl2.currentTime = 0;
+                    videoEl2.play().catch(() => {}).finally(() => {
+                        lastRenderedIdx = -1;
+                        loopPending = false;
+                    });
+                } else {
+                    this._videoPause();
+                    return;
+                }
+            }
+
+            if (loopPending) return; // wait for seek to complete before rendering
+
+            let idx;
+            if (videoEl2 && this._videoFPS > 0 && !videoEl2.paused) {
+                idx = Math.min(
+                    Math.round(videoEl2.currentTime * this._videoFPS),
+                    this._videoSequence.length - 1
+                );
+            } else {
+                idx = this._videoCurrentFrame;
+            }
+
+            // Only re-render when the frame index actually changes
+            if (idx !== lastRenderedIdx) {
+                this._videoCurrentFrame = idx;
+                this._renderVideoFrame(idx);
+                lastRenderedIdx = idx;
+            }
+        };
+        this._videoTimer = requestAnimationFrame(tick);
+    }
+
+    _videoPause() {
+        this._videoPlaying = false;
+        if (this._videoTimer !== null) {
+            cancelAnimationFrame(this._videoTimer);
+            this._videoTimer = null;
+        }
+        const btn = document.getElementById('video-play-btn');
+        if (btn) { btn.textContent = '▶ Play'; btn.classList.remove('playing'); }
+        const videoEl = document.getElementById('video-preview');
+        if (videoEl) videoEl.pause();
+        // Restore normal EMA for live webcam use after video session
+        if (this.avatar) this.avatar.setBypassEMA(false);
+    }
+
+    _renderVideoFrame(idx) {
+        const frame = this._videoSequence[idx];
+
+        // Drive avatar bones
+        if (frame?.landmarks && this.avatar) {
+            this.avatar.updatePose(frame.landmarks);
+        }
+
+        // Sync video preview only when manually seeking (scrubber), not during auto-play.
+        // During auto-play the video element is the master clock — never seek it here.
+        if (!this._videoPlaying) {
+            const videoEl = document.getElementById('video-preview');
+            if (videoEl && this._videoFPS > 0) videoEl.currentTime = idx / this._videoFPS;
+        }
+
+        // Draw skeleton overlay
+        if (frame?.landmarks) this._drawSkeleton(frame.landmarks);
+
+        // Update scrubber + counter
+        const scrubber = document.getElementById('video-scrubber');
+        if (scrubber) scrubber.value = idx;
+        const cur = document.getElementById('vid-cur-frame');
+        if (cur) cur.textContent = idx;
+    }
+
+    _videoReset() {
+        this._videoPause();
+        this._videoSequence     = [];
+        this._videoCurrentFrame = 0;
+
+        if (this._videoBlobUrl) { URL.revokeObjectURL(this._videoBlobUrl); this._videoBlobUrl = null; }
+        const videoEl = document.getElementById('video-preview');
+        if (videoEl) videoEl.src = '';
+
+        document.getElementById('video-upload-zone').style.display       = 'block';
+        document.getElementById('video-processing').style.display        = 'none';
+        document.getElementById('video-info-box').style.display          = 'none';
+        document.getElementById('video-playback-controls').style.display = 'none';
+        document.getElementById('view-toggle').classList.remove('show');
+        document.getElementById('video-file-input').value                = '';
+        document.getElementById('video-proc-bar-fill').style.width       = '0%';
+
+        // Reset to avatar-only view
+        this._setVideoView('avatar');
+        document.querySelectorAll('.view-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.view === 'avatar'));
+    }
+
+    // ── Action loop ───────────────────────────────────────────────────────────
     _lastActionTime = performance.now();
 
     _startActionLoop() {
         const tick = () => {
             requestAnimationFrame(tick);
-
             const now = performance.now();
             const dt  = Math.min((now - this._lastActionTime) / 1000, 0.05);
             this._lastActionTime = now;
 
+            // In video mode, disable keyboard and pose-driven movement
+            if (this.appMode === 'video') {
+                this.actionCtrl.poseMode = false;
+                this.actionCtrl.active.clear();
+            }
+
             const { position, rotationRad, locomotionState } = this.actionCtrl.update(dt);
+            if (this.avatar) this.avatar.setWorldTransform(position, rotationRad, locomotionState);
 
-            if (this.avatar) {
-                this.avatar.setWorldTransform(position, rotationRad, locomotionState);
-            }
+            if (this.keyboardCtrl) this.keyHUD.update(this.keyboardCtrl.getHeldKeys());
 
-            // Update HUD
-            if (this.keyboardCtrl) {
-                this.keyHUD.update(this.keyboardCtrl.getHeldKeys());
-            }
-
-            // Position readout
             document.getElementById('pos-x').textContent = position.x.toFixed(1);
             document.getElementById('pos-y').textContent = position.y.toFixed(1);
             document.getElementById('pos-z').textContent = position.z.toFixed(1);
             document.getElementById('pos-r').textContent =
                 (THREE.MathUtils.radToDeg(rotationRad) % 360).toFixed(0) + '°';
 
-            // Speed estimate
-            const dp   = position.distanceTo(this._lastPos);
-            const ddt  = (now - this._lastPosTime) / 1000;
+            const dp  = position.distanceTo(this._lastPos);
+            const ddt = (now - this._lastPosTime) / 1000;
             if (ddt > 0.1) {
                 document.getElementById('speed-val').textContent = (dp / ddt).toFixed(1);
                 this._lastPos.copy(position);
                 this._lastPosTime = now;
             }
 
-            // Action state badge
             const badge = document.getElementById('action-state');
             badge.textContent = locomotionState.toUpperCase();
             badge.className   = '';
@@ -726,12 +1519,10 @@ class PosiSimApp {
         requestAnimationFrame(tick);
     }
 
-    // ── Recording controls ────────────────────────────────────────────────────
+    // ── Recording ─────────────────────────────────────────────────────────────
     _startRecording() {
         this._showCountdown('Recording starts in…');
-        setTimeout(() => {
-            this.ws.send(JSON.stringify({ action: 'start_recording' }));
-        }, 5000);
+        setTimeout(() => this.ws.send(JSON.stringify({ action: 'start_recording' })), 5000);
     }
     _stopRecording() {
         this.ws.send(JSON.stringify({ action: 'stop_recording' }));
@@ -740,34 +1531,46 @@ class PosiSimApp {
         document.getElementById('stop-btn').disabled  = true;
         document.getElementById('save-btn').disabled  = false;
     }
-    _saveBVH() {
-        this.ws.send(JSON.stringify({ action: 'save_bvh' }));
+    _saveBVH() { this.ws.send(JSON.stringify({ action: 'save_bvh' })); }
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+    _resetAvatar() {
+        this.actionCtrl.position.set(0, 0, 0);
+        this.actionCtrl.rotation      = 0;
+        this.actionCtrl.verticalVel   = 0;
+        this.actionCtrl.isGrounded    = true;
+        this.actionCtrl.isCrouching   = false;
+        this.actionCtrl.isSprinting   = false;
+        this.actionCtrl.locomotionState = 'idle';
+        this.actionCtrl._poseHipX     = undefined;
+        this.actionCtrl._poseHipY     = undefined;
+        this.actionCtrl.active.clear();
+
+        if (this.avatar) {
+            this.avatar.controls.target.set(0, 80, 0);
+            this.avatar.camera.position.set(0, 160, 320);
+            this.avatar.camera.lookAt(0, 80, 0);
+            this.avatar.controls.update();
+        }
     }
 
     // ── Countdown overlay ────────────────────────────────────────────────────
     _showCountdown(label = 'Get ready…') {
         const overlay = document.getElementById('countdown-overlay');
-        const numEl = document.getElementById('countdown-number');
+        const numEl   = document.getElementById('countdown-number');
         const labelEl = document.getElementById('countdown-label');
-        
         overlay.classList.add('show');
         labelEl.textContent = label;
-        
         let count = 5;
         numEl.textContent = count;
-        
-        const interval = setInterval(() => {
-            count -= 1;
-            if (count < 0) {
-                clearInterval(interval);
-                overlay.classList.remove('show');
-            } else {
-                numEl.textContent = count;
-            }
+        const iv = setInterval(() => {
+            count--;
+            if (count < 0) { clearInterval(iv); overlay.classList.remove('show'); }
+            else numEl.textContent = count;
         }, 1000);
     }
 
-    // ── Status helpers ────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
     _setWSStatus(label, ok) {
         document.getElementById('ws-status').textContent = label;
         document.getElementById('ws-dot').classList.toggle('on', ok);
@@ -784,9 +1587,7 @@ class PosiSimApp {
     }
 }
 
-window.addEventListener('load', () => {
-    window.posiSimApp = new PosiSimApp();
-});
+window.addEventListener('load', () => { window.posiSimApp = new PosiSimApp(); });
 </script>
 </body>
 </html>

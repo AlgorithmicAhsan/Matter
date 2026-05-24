@@ -50,11 +50,11 @@ class DetectorConfig:
     KEY_VIS_MIN                = 0.40    # gate for structural landmarks (hips/shoulders)
 
     # Temporal voting windows (frames) — only used for CROUCH / JUMP
-    VOTE_WINDOW                = 8       # majority = > window//2 + 1
+    VOTE_WINDOW                = 14      # majority = > window//2 + 1 (longer = less jitter)
     JUMP_VOTE_WINDOW           = 4       # 4-frame window; jump needs only 1 positive vote
 
     # -- Crouch ---------------------------------------------------------------
-    CROUCH_HIP_DROP_RATIO      = 0.13    # drop > 13% of torso length -> crouch
+    CROUCH_HIP_DROP_RATIO      = 0.22    # drop > 22% of torso length -> crouch (raised to kill jitter)
 
     # -- Jump -----------------------------------------------------------------
     JUMP_HIP_RISE_RATIO        = 0.15    # hip rises > 15% of torso in <=4 frames
@@ -63,7 +63,7 @@ class DetectorConfig:
     # -- Rotation (shoulder angle delta) --------------------------------------
     ROTATION_EMA               = 0.20    # EMA smoothing: lower = smoother, more lag
     ROTATION_SCALE             = 0.9     # amplify the smoothed delta
-    ROTATION_DEADZONE          = 0.003   # ignore deltas smaller than this (radians)
+    ROTATION_DEADZONE          = 0.018   # ignore deltas smaller than this — raised to kill arm-raise noise
 
     # -- Hip X mirroring → world units ----------------------------------------
     # Avatar is 150 units tall, world is 1000 units wide.
@@ -76,8 +76,9 @@ class DetectorConfig:
     WALK_SPEED_MAX             = 180.0
 
     # -- Anti-phase walking ---------------------------------------------------
-    ANKLE_OSC_THRESHOLD        = 0.045   # min avg peak-to-peak amplitude
-    WALK_ANTIPHASE_CORR        = -0.30   # correlation must be below this
+    ANKLE_OSC_THRESHOLD        = 0.10    # min avg peak-to-peak amplitude
+    WALK_ANTIPHASE_CORR        = -0.50   # correlation must be below this
+    ANKLE_MIN_STD              = 0.008   # BOTH ankles must move this much — kills single-leg triggers
 
     # -- Walk direction (nose-hip delta, normalised) ---------------------------
     LEAN_FORWARD_THRESHOLD     = -0.04
@@ -238,26 +239,21 @@ class PoseActionDetector:
         hip_x_offset = self.neutral_hip_x - hip_x
         hip_x_world  = hip_x_offset * self.cfg.HIP_X_WORLD_SCALE
 
-        # Y mapping: Map crouching directly to physical lowering of the avatar.
-        # We only map downward movement (crouching), jumping is physics-driven.
-        # If user crouches, hip_y > neutral_hip_y. Avatar world Y goes negative.
-        hip_y_offset = max(0.0, hip_y - self.neutral_hip_y)
+        # Y mapping: only lower the avatar when the person is clearly crouching.
+        # Apply a dead-band (10% of torso) so normal posture noise doesn't float the avatar.
+        hip_y_raw    = hip_y - self.neutral_hip_y          # positive = hips dropped
+        dead_band    = self.neutral_torso_length * 0.10
+        hip_y_offset = max(0.0, hip_y_raw - dead_band)     # only the amount past the dead-band
         hip_y_world  = -hip_y_offset * self.cfg.HIP_X_WORLD_SCALE * 1.5
 
         # ── Walking: anti-phase ankle oscillation ─────────────────────────────
         is_walking, osc_amp = self._ankles_alternating()
 
         walk_speed     = 0.0
-        walk_direction = 1
+        walk_direction = 1   # always forward — nose-hip lean is too unreliable for direction
         if is_walking:
             raw_speed  = osc_amp * self.cfg.WALK_SPEED_SCALE
             walk_speed = float(np.clip(raw_speed, self.cfg.WALK_SPEED_MIN, self.cfg.WALK_SPEED_MAX))
-
-            nose_hip_dy  = landmarks[NOSE]['y'] - (landmarks[L_HIP]['y'] + landmarks[R_HIP]['y']) / 2
-            dy_delta     = nose_hip_dy - self.neutral_nose_hip_dy
-            if   dy_delta < self.cfg.LEAN_FORWARD_THRESHOLD:  walk_direction =  1
-            elif dy_delta > self.cfg.LEAN_BACKWARD_THRESHOLD: walk_direction = -1
-            else:                                               walk_direction =  1
 
         return {
             'rotation_delta':  float(rotation_delta),
@@ -381,11 +377,6 @@ class PoseActionDetector:
             is_jump = is_fast_enough and is_above_neutral and ankles_lifted
         self._votes[ActionType.JUMP].append(int(is_jump))
 
-        # --- DEBUG JUMP ---
-        print(f"[DEBUG JUMP] Frame Buf: {len(self._hip_y_buf)}/{self.cfg.JUMP_VOTE_WINDOW} | "
-              f"Current Hip Y: {hip_y:.4f} | Rise Ratio: {hip_rise:.4f} (Threshold: {self.cfg.JUMP_HIP_RISE_RATIO}) | "
-              f"Vote Cast: {is_jump}")
-
     # =========================================================================
     # Vote tallying
     # =========================================================================
@@ -431,7 +422,8 @@ class PoseActionDetector:
 
         la_std = la.std()
         ra_std = ra.std()
-        if la_std < 1e-4 or ra_std < 1e-4:
+        # Both ankles must show meaningful movement — kills single-leg raises
+        if la_std < self.cfg.ANKLE_MIN_STD or ra_std < self.cfg.ANKLE_MIN_STD:
             return False, 0.0
 
         la_n = la - la.mean()

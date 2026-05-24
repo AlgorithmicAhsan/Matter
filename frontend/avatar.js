@@ -16,6 +16,11 @@ class AvatarRenderer {
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
+        // Prevent renderer.setSize from fixing the canvas to pixel dimensions via
+        // inline style — let CSS (width:100%; height:100%) size the display instead.
+        // The render buffer resolution is set correctly above; only display differs.
+        this.renderer.domElement.style.width  = '';
+        this.renderer.domElement.style.height = '';
         this.renderer.shadowMap.enabled = true;
         this.renderer.outputEncoding = THREE.sRGBEncoding; // critical for GLTF materials
         this.renderer.toneMapping = THREE.NoToneMapping;
@@ -33,6 +38,7 @@ class AvatarRenderer {
         this.model       = null;
         this.bones       = {};
         this.restPose    = {};
+        this._boneToChildDir = {}; // leg bone "toward child" directions, filled at load time
         this._modelYOffset = 0; // FIX: store load-time Y offset separately
 
         this.worldPosition   = new THREE.Vector3();
@@ -44,25 +50,48 @@ class AvatarRenderer {
         this._smoothLm = null;
         
         this.boneMap = {
-            leftArm:      'mixamorigLeftArm',
-            rightArm:     'mixamorigRightArm',
-            leftForeArm:  'mixamorigLeftForeArm',
-            rightForeArm: 'mixamorigRightForeArm',
-            leftUpLeg:    'mixamorigLeftUpLeg',
-            rightUpLeg:   'mixamorigRightUpLeg',
-            leftLeg:      'mixamorigLeftLeg',
-            rightLeg:     'mixamorigRightLeg',
-            leftFoot:     'mixamorigLeftFoot',
-            rightFoot:    'mixamorigRightFoot',
-            spine:        'mixamorigSpine',
-            spine1:       'mixamorigSpine1',
-            spine2:       'mixamorigSpine2',
-            hips:         'mixamorigHips',
+            leftArm:       'mixamorigLeftArm',
+            rightArm:      'mixamorigRightArm',
+            leftForeArm:   'mixamorigLeftForeArm',
+            rightForeArm:  'mixamorigRightForeArm',
+            leftUpLeg:     'mixamorigLeftUpLeg',
+            rightUpLeg:    'mixamorigRightUpLeg',
+            leftLeg:       'mixamorigLeftLeg',
+            rightLeg:      'mixamorigRightLeg',
+            leftFoot:      'mixamorigLeftFoot',
+            rightFoot:     'mixamorigRightFoot',
+            spine:         'mixamorigSpine',
+            spine1:        'mixamorigSpine1',
+            spine2:        'mixamorigSpine2',
+            hips:          'mixamorigHips',
+            // Clavicles — lift when arm is raised
+            leftClavicle:  'mixamorigLeftShoulder',
+            rightClavicle: 'mixamorigRightShoulder',
         };
 
         // Leg swing sign — +1 or -1, auto-detected after model loads
         // (some Mixamo exports have inverted local X for leg bones)
         this._legSign = 1;
+
+        // Pre-allocated scratch objects — reused every frame to avoid GC pressure.
+        // rotQ is used in updatePose scope; q0/q1 are used inside _aimBone/_applyClavicle.
+        this._scratch = {
+            v0: new THREE.Vector3(), v1: new THREE.Vector3(),
+            v2: new THREE.Vector3(), v3: new THREE.Vector3(),
+            q0: new THREE.Quaternion(), q1: new THREE.Quaternion(),
+            rotQ: new THREE.Quaternion(),
+        };
+
+        // Per-landmark EMA smoothing alphas — higher = more responsive, less smooth.
+        // These smooth the raw landmark positions; bone slerp is a separate alpha.
+        this._lmAlpha = new Array(33).fill(0.30);
+        for (let i = 11; i <= 16; i++) this._lmAlpha[i] = 0.50; // arms — fast
+        for (let i = 23; i <= 28; i++) this._lmAlpha[i] = 0.40; // legs
+        for (let i = 29; i <= 32; i++) this._lmAlpha[i] = 0.35; // feet
+
+        // When true, landmark EMA is bypassed (alpha=1) so pre-computed video
+        // poses are applied instantly with no lag vs the skeleton overlay.
+        this._bypassEMA = false;
 
         // 'direct' = live landmark-to-bone translation
         // 'gesture' = action/gesture-driven procedural animation
@@ -81,6 +110,12 @@ class AvatarRenderer {
             this._smoothLm = null;
         }
         console.log('[AvatarRenderer] Translation mode set to:', mode);
+    }
+
+    /** Call with true during video playback, false for live webcam. */
+    setBypassEMA(enabled) {
+        this._bypassEMA = enabled;
+        if (enabled) this._smoothLm = null; // clear stale EMA state
     }
 
     _setupLighting() {
@@ -163,6 +198,32 @@ class AvatarRenderer {
                 this.restPose[n] = this.bones[n].quaternion.clone();
             });
 
+            // Pre-compute the actual "toward child" direction for each leg bone,
+            // expressed in that bone's parent-local space at rest.
+            // childBone.position = child joint offset in CURRENT bone's local space.
+            // Applying the current bone's rest quaternion rotates it into PARENT-local space.
+            // This is the correct restDir for _aimBone — no assumption about which local
+            // axis points toward the child (avoids antiparallel singularity for any rig).
+            this._boneToChildDir = {};
+            const legChildPairs = [
+                [this.boneMap.leftUpLeg,  this.boneMap.leftLeg],
+                [this.boneMap.leftLeg,    this.boneMap.leftFoot],
+                [this.boneMap.rightUpLeg, this.boneMap.rightLeg],
+                [this.boneMap.rightLeg,   this.boneMap.rightFoot],
+            ];
+            for (const [parentName, childName] of legChildPairs) {
+                const childBone  = this.bones[childName];
+                const parentRest = this.restPose[parentName];
+                if (childBone && parentRest && childBone.position.lengthSq() > 0) {
+                    this._boneToChildDir[parentName] =
+                        childBone.position.clone().normalize().applyQuaternion(parentRest);
+                }
+            }
+            console.log('Leg restDirs:', JSON.stringify(
+                Object.fromEntries(Object.entries(this._boneToChildDir)
+                    .map(([k,v]) => [k, [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]]))
+            ));
+
             const overlay = document.getElementById('loading-overlay');
             if (overlay) overlay.style.display = 'none';
 
@@ -204,39 +265,119 @@ class AvatarRenderer {
 
         this._landmarkTimestamp = performance.now();
 
-        const alpha = 0.18;
+        // ── Per-region EMA smoothing ────────────────────────────────────────
+        // _bypassEMA=true in video playback: landmarks are already clean and
+        // EMA introduces lag that desynchronises avatar from the skeleton overlay.
         if (!this._smoothLm) {
             this._smoothLm = landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
+        } else if (this._bypassEMA) {
+            for (let i = 0; i < landmarks.length; i++) {
+                this._smoothLm[i].x = landmarks[i].x;
+                this._smoothLm[i].y = landmarks[i].y;
+                this._smoothLm[i].z = landmarks[i].z;
+            }
         } else {
             for (let i = 0; i < landmarks.length; i++) {
-                this._smoothLm[i].x += alpha * (landmarks[i].x - this._smoothLm[i].x);
-                this._smoothLm[i].y += alpha * (landmarks[i].y - this._smoothLm[i].y);
-                this._smoothLm[i].z += alpha * (landmarks[i].z - this._smoothLm[i].z);
+                const a = this._lmAlpha[i] ?? 0.12;
+                this._smoothLm[i].x += a * (landmarks[i].x - this._smoothLm[i].x);
+                this._smoothLm[i].y += a * (landmarks[i].y - this._smoothLm[i].y);
+                this._smoothLm[i].z += a * (landmarks[i].z - this._smoothLm[i].z);
             }
         }
 
         const j = this._smoothLm;
-        const v = (lm) => new THREE.Vector3(lm.x - 0.5, -lm.y, -lm.z * 0.5);
-        // For legs, ignore Z depth entirely — MediaPipe leg depth is too noisy
-        // and causes bones to rotate in the sagittal (front-back) plane incorrectly.
-        const vLeg = (lm) => new THREE.Vector3(lm.x - 0.5, -lm.y, 0);
 
-        // Arms
-        this._aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
-        this._aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
-        this._aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
-        this._aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
+        // ── Body-relative coordinate frame ──────────────────────────────────
+        // Center all positions on the hip midpoint and scale by torso length.
+        // This keeps the mapping stable regardless of where the user stands in
+        // the camera frame or how far they are from the camera.
+        const hipMidX = (j[23].x + j[24].x) / 2;
+        const hipMidY = (j[23].y + j[24].y) / 2;
+        const shdMidY = (j[11].y + j[12].y) / 2;
+        // Torso length = hip-to-shoulder distance in Y (most stable axis).
+        const torsoLen = Math.max(Math.abs(hipMidY - shdMidY), 0.05);
 
-        // Legs (heavy smoothing 0.1 to prevent depth jitter when crouching)
-        this._aimBone(this.boneMap.leftUpLeg,  vLeg(j[23]), vLeg(j[25]), 0.1, true);
-        this._aimBone(this.boneMap.leftLeg,    vLeg(j[25]), vLeg(j[27]), 0.1, true);
-        this._aimBone(this.boneMap.rightUpLeg, vLeg(j[24]), vLeg(j[26]), 0.1, true);
-        this._aimBone(this.boneMap.rightLeg,   vLeg(j[26]), vLeg(j[28]), 0.1, true);
+        // Convert one landmark index to a body-relative 3-D vector.
+        // MediaPipe: x→right (0-1), y→down (0-1), z→depth (neg = closer to cam).
+        // Output:    x→right, y→up, z→forward (away from camera, scaled).
+        // Set stripZ=true for legs — MediaPipe leg depth is too unreliable.
+        const bv = (idx, stripZ = false) => {
+            const lmk = j[idx];
+            return new THREE.Vector3(
+                (lmk.x - hipMidX) / torsoLen,
+                -(lmk.y - hipMidY) / torsoLen,
+                stripZ ? 0 : (-lmk.z / torsoLen)
+            );
+        };
 
-        // Spine
-        const hipMid = v(j[23]).clone().add(v(j[24])).multiplyScalar(0.5);
-        const shdMid = v(j[11]).clone().add(v(j[12])).multiplyScalar(0.5);
-        this._aimBone(this.boneMap.spine, hipMid, shdMid);
+        // ── Avatar-rotation compensation ────────────────────────────────────
+        // Pre-rotate each body-relative direction by worldRotation so _aimBone's
+        // parent-quaternion removal cancels correctly at any facing angle.
+        const rotQ = this._scratch.rotQ.setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0), this.worldRotation
+        );
+        const lv = (idx, stripZ = false) => bv(idx, stripZ).applyQuaternion(rotQ);
+
+        // ── Arms ────────────────────────────────────────────────────────────
+        // Slerp alpha here controls how fast the bone tracks the (already-smoothed)
+        // landmark target. Keep it high (0.5+) for responsive tracking.
+        this._aimBone(this.boneMap.leftArm,      lv(11), lv(13), 0.55);
+        this._aimBone(this.boneMap.leftForeArm,  lv(13), lv(15), 0.55);
+        this._aimBone(this.boneMap.rightArm,     lv(12), lv(14), 0.55);
+        this._aimBone(this.boneMap.rightForeArm, lv(14), lv(16), 0.55);
+
+        // ── Clavicle compensation ───────────────────────────────────────────
+        this._applyClavicle(this.boneMap.leftClavicle,  lv(11), lv(13), false);
+        this._applyClavicle(this.boneMap.rightClavicle, lv(12), lv(14), true);
+
+        // ── Legs ────────────────────────────────────────────────────────────
+        // _aimBone with useRestDir=true now uses _boneToChildDir — the bone's
+        // actual toward-child direction (from child bone position at rest), so
+        // it works regardless of whether the Mixamo rig's Y+ points toward child
+        // or parent.  For a standing person localDir ≈ restDir → no rotation.
+        this._aimBone(this.boneMap.leftUpLeg,  lv(23), lv(25), 0.45, true);
+        this._aimBone(this.boneMap.leftLeg,    lv(25), lv(27), 0.45, true);
+        this._aimBone(this.boneMap.rightUpLeg, lv(24), lv(26), 0.45, true);
+        this._aimBone(this.boneMap.rightLeg,   lv(26), lv(28), 0.45, true);
+
+        // ── Feet ─────────────────────────────────────────────────────────────
+        if (landmarks.length > 32) {
+            this._aimBone(this.boneMap.leftFoot,  lv(29), lv(31), 0.35, true);
+            this._aimBone(this.boneMap.rightFoot, lv(30), lv(32), 0.35, true);
+        }
+
+        // ── Spine ───────────────────────────────────────────────────────────
+        // Strip Z: MediaPipe depth (Z) for torso is noisy in video and causes
+        // the spine to lean forward/backward spuriously.  XY tilt is reliable.
+        const spineHipX = (lv(23).x + lv(24).x) / 2;
+        const spineHipY = (lv(23).y + lv(24).y) / 2;
+        const spineShdX = (lv(11).x + lv(12).x) / 2;
+        const spineShdY = (lv(11).y + lv(12).y) / 2;
+        const spineHipVec = this._scratch.v2.set(spineHipX, spineHipY, 0);
+        const spineShdVec = this._scratch.v3.set(spineShdX, spineShdY, 0);
+        this._aimBone(this.boneMap.spine, spineHipVec, spineShdVec, 0.20);
+
+    }
+
+    // Lift the clavicle bone proportionally when the arm is raised above horizontal.
+    // isRight=true flips the lift axis for the right side.
+    _applyClavicle(clavName, shoulderVec, elbowVec, isRight) {
+        const bone = this.bones[clavName];
+        const rest = this.restPose[clavName];
+        if (!bone || !rest) return;
+
+        const dir = this._scratch.v0.subVectors(elbowVec, shoulderVec).normalize();
+        // dir.y: +1 = arm fully raised, 0 = horizontal, -1 = arm down.
+        const elevation = Math.max(0, dir.y);
+        const liftAngle = elevation * 0.30;
+
+        const zSign = isRight ? -1 : 1;
+        const offsetQ = this._scratch.q1.setFromEuler(
+            new THREE.Euler(0, 0, zSign * liftAngle)
+        );
+        // Apply offset on top of rest pose (rest × offset)
+        this._scratch.q0.copy(rest).multiply(offsetQ);
+        bone.quaternion.slerp(this._scratch.q0, 0.35);
     }
 
     _applyLocomotionAnim(dt) {
@@ -278,10 +419,12 @@ class AvatarRenderer {
             }
 
             if (!livePoseActive) {
-                [this.boneMap.leftUpLeg, this.boneMap.rightUpLeg,
-                 this.boneMap.leftLeg,   this.boneMap.rightLeg,
-                 this.boneMap.leftFoot,  this.boneMap.rightFoot,
-                 this.boneMap.spine].forEach(n => returnToRest(n));
+                [this.boneMap.leftUpLeg,    this.boneMap.rightUpLeg,
+                 this.boneMap.leftLeg,      this.boneMap.rightLeg,
+                 this.boneMap.leftFoot,     this.boneMap.rightFoot,
+                 this.boneMap.spine,
+                 this.boneMap.leftClavicle, this.boneMap.rightClavicle,
+                ].forEach(n => returnToRest(n));
             }
 
         } else if (state === 'walk' || state === 'run') {
@@ -358,22 +501,30 @@ class AvatarRenderer {
         const rest = this.restPose[boneName];
         if (!bone || !rest) return;
 
-        const dir = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
-        if (dir.length() < 0.001) return;
+        // Reuse scratch objects — no heap allocation per call.
+        const sc = this._scratch;
+        const dir = sc.v0.subVectors(toVec, fromVec).normalize();
+        if (dir.lengthSq() < 0.000001) return;
 
-        const parentQ = new THREE.Quaternion();
+        const parentQ = sc.q0;
+        parentQ.identity();
         if (bone.parent) bone.parent.getWorldQuaternion(parentQ);
-        const localDir = dir.clone().applyQuaternion(parentQ.invert());
+        const localDir = sc.v1.copy(dir).applyQuaternion(parentQ.invert());
 
-        let targetQ;
+        const targetQ = sc.q1;
         if (useRestDir) {
-            // Use bone's actual rest direction to avoid antiparallel singularity.
-            // Only needed for leg bones whose rest direction is ~(0,-1,0).
-            const restDir = new THREE.Vector3(0, 1, 0).applyQuaternion(rest).normalize();
-            const deltaQ = new THREE.Quaternion().setFromUnitVectors(restDir, localDir.normalize());
-            targetQ = deltaQ.multiply(rest.clone());
+            // Use pre-computed child-direction if available (leg bones).
+            // childBone.position expressed in parent space via rest quaternion —
+            // this is the actual "toward child" axis, avoiding (0,1,0) assumption
+            // which hits antiparallel singularity on many Mixamo rigs.
+            const precomputed = this._boneToChildDir && this._boneToChildDir[boneName];
+            const restDir = precomputed
+                ? sc.v2.copy(precomputed)
+                : sc.v2.set(0, 1, 0).applyQuaternion(rest).normalize();
+            targetQ.setFromUnitVectors(restDir, localDir.normalize());
+            targetQ.multiply(rest);
         } else {
-            targetQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), localDir);
+            targetQ.setFromUnitVectors(sc.v3.set(0, 1, 0), localDir);
         }
 
         bone.quaternion.slerp(targetQ, alpha);
@@ -390,8 +541,14 @@ class AvatarRenderer {
     }
 
     _onWindowResize() {
-        this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
+        const w = this.container.clientWidth;
+        const h = this.container.clientHeight;
+        this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.renderer.setSize(w, h);
+        // setSize re-writes inline pixel styles — clear them again so CSS flex
+        // controls display size (avoids canvas overflowing in "both" view).
+        this.renderer.domElement.style.width  = '';
+        this.renderer.domElement.style.height = '';
     }
 }

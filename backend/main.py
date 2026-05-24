@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from pose import PoseExtractor
@@ -67,6 +67,68 @@ async def list_outputs():
     return {"files": [f.name for f in sorted(files, reverse=True)]}
 
 
+@app.post("/process_video")
+async def process_video(file: UploadFile = File(...)):
+    """
+    Accept a video upload, run MediaPipe Pose on every frame,
+    and return the full landmark sequence as JSON.
+
+    Processing runs in a thread-pool executor so it does NOT block
+    the async event loop — the WebSocket camera feed stays alive.
+    """
+    import tempfile, shutil, concurrent.futures
+
+    # Check extension as fallback — MIME type can be unreliable across browsers
+    filename = file.filename or "upload.mp4"
+    suffix   = Path(filename).suffix.lower()
+    allowed  = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
+    if suffix not in allowed and not (file.content_type or "").startswith("video/"):
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
+
+    # Write upload to a temp file (UploadFile.file is sync SpooledTemporaryFile)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    def _extract_poses(path: str):
+        """CPU-bound: runs in thread pool, safe to block here."""
+        ext = PoseExtractor()
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return None, "Could not open video file."
+
+        fps      = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        sequence = []
+        idx      = 0
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            landmarks, _ = ext.process_frame(frame)
+            sequence.append({"frame_idx": idx, "landmarks": landmarks})
+            idx += 1
+
+        cap.release()
+        return {"fps": round(fps, 2), "total_frames": idx, "landmark_sequence": sequence}, None
+
+    try:
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result, err = await loop.run_in_executor(pool, _extract_poses, tmp_path)
+
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+
+        detected = sum(1 for f in result["landmark_sequence"] if f["landmarks"])
+        print(f"[process_video] {filename}: {result['total_frames']} frames @ "
+              f"{result['fps']} fps, {detected} with pose detected.")
+
+        return JSONResponse(result)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -101,19 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
 
             landmarks, annotated = state.extractor.process_frame(frame)
-            
-            # --- DEBUG LOGS BEFORE UNCERTAINTY ---
-            print(f"--- FRAME {state.frame_count + 1} ---")
-            if landmarks and len(landmarks) > 24:
-                hip_y = (landmarks[23]['y'] + landmarks[24]['y']) / 2
-                print(f"[DEBUG MAIN] Raw Landmarks - Hip Y: {hip_y:.4f}")
-            else:
-                print(f"[DEBUG MAIN] Raw Landmarks - Invalid or None")
-
             uncertainty_result   = state.scorer.score(landmarks)
-            
-            # --- DEBUG LOGS AFTER UNCERTAINTY ---
-            print(f"[DEBUG MAIN] Uncertainty Trusted: {uncertainty_result['trusted']} | Total Uncertainty: {uncertainty_result['total']:.4f}")
             
             state.last_landmarks = landmarks
             state.frame_count   += 1

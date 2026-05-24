@@ -356,16 +356,17 @@ class KeyboardHUD {
 /**
  * PoseModeController
  * Manages the pose-mode toggle button and calibration progress bar in the UI.
- * Communicates with the backend via the WebSocket send callback.
+ * Uses window.posiSimApp.ws directly so it always talks to the live socket,
+ * even if the connection was recreated after a disconnect.
  */
 class PoseModeController {
-    /**
-     * @param {function(object): void} wsSend  callback that JSON-stringifies and sends
-     */
     constructor(wsSend) {
-        this._send       = wsSend;
+        // wsSend kept only for legacy compat — internal sends go through _wsSend()
+        this._legacySend = wsSend;
         this._poseMode   = false;
         this._calibrated = false;
+        this._timer      = null;    // setTimeout handle while countdown runs
+        this.isPending   = false;   // true while countdown is ticking
 
         this._btn      = document.getElementById('pose-mode-btn');
         this._bar      = document.getElementById('calib-bar-fill');
@@ -377,20 +378,60 @@ class PoseModeController {
         }
     }
 
+    // Always grabs the current live WebSocket — no stale-closure risk.
+    _wsSend(msg) {
+        const app = window.posiSimApp;
+        if (app && app.ws && app.ws.readyState === WebSocket.OPEN) {
+            app.ws.send(JSON.stringify(msg));
+            return true;
+        }
+        console.warn('[PoseModeCtrl] WebSocket not open — could not send:', msg.action);
+        return false;
+    }
+
     _toggle() {
-        this._poseMode = !this._poseMode;
-        this._send({ action: 'set_pose_mode', enabled: this._poseMode });
-        this._updateBtn();
-        
-        // Show countdown when pose mode is turned ON
-        if (this._poseMode && window.posiSimApp) {
-            window.posiSimApp._showCountdown('Pose calibration starts in…');
+        if (!this._poseMode) {
+            // ── Turning ON ──────────────────────────────────────────────────
+            // Flip local state immediately so the button shows "Starting…"
+            this._poseMode = true;
+            this.isPending = true;
+            this._updateBtn();
+
+            // Show countdown overlay
+            window.posiSimApp?._showCountdown('Stand still — calibration starts in…');
+
+            // After the countdown, tell the backend to start
+            this._timer = setTimeout(() => {
+                this._timer    = null;
+                this.isPending = false;
+                console.log('[PoseModeCtrl] Countdown finished — sending set_pose_mode ON');
+                const sent = this._wsSend({ action: 'set_pose_mode', enabled: true });
+                if (!sent) {
+                    // WS was closed — revert so the user can try again
+                    this._poseMode = false;
+                }
+                this._updateBtn();
+            }, 5000);
+
+        } else {
+            // ── Turning OFF ─────────────────────────────────────────────────
+            if (this._timer !== null) {
+                clearTimeout(this._timer);
+                this._timer    = null;
+                this.isPending = false;
+            }
+            this._poseMode = false;
+            this._wsSend({ action: 'set_pose_mode', enabled: false });
+            this._updateBtn();
         }
     }
 
     /** Called each frame when a WS payload arrives. */
     onFrame(poseMode, calibrated, calibProgress) {
-        this._poseMode   = poseMode;
+        // While countdown is running the backend still reports pose_mode=false — ignore it.
+        if (!this.isPending) {
+            this._poseMode = poseMode;
+        }
         this._calibrated = calibrated;
         this._updateBtn();
         this._updateCalibBar(calibrated, calibProgress);
@@ -399,7 +440,11 @@ class PoseModeController {
     _updateBtn() {
         if (!this._btn) return;
         if (this._poseMode) {
-            this._btn.textContent = this._calibrated ? '🎥 Pose ON' : '⏳ Calibrating…';
+            let label;
+            if (this.isPending)          label = '⏳ Starting…';
+            else if (this._calibrated)   label = '🎥 Pose ON';
+            else                         label = '⏳ Calibrating…';
+            this._btn.textContent = label;
             this._btn.classList.add('active');
         } else {
             this._btn.textContent = '🎥 Pose OFF';
@@ -419,7 +464,16 @@ class PoseModeController {
             `Stand still — calibrating ${(progress * 100).toFixed(0)}%`;
     }
 
+    /** Immediately turn pose off — used when switching app modes. */
+    _forceOff() {
+        if (this._timer !== null) { clearTimeout(this._timer); this._timer = null; }
+        this.isPending   = false;
+        this._poseMode   = false;
+        this._wsSend({ action: 'set_pose_mode', enabled: false });
+        this._updateBtn();
+    }
+
     resetCalibration() {
-        this._send({ action: 'reset_calibration' });
+        this._wsSend({ action: 'reset_calibration' });
     }
 }
