@@ -2,111 +2,96 @@ import cv2
 import mediapipe as mp
 import sys
 
-# MediaPipe Pose connections - pairs of landmark indices that should be connected
-POSE_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 7),       # face left
-    (0, 4), (4, 5), (5, 6), (6, 8),       # face right
-    (11, 12),                               # shoulders
-    (11, 13), (13, 15),                    # left arm
-    (12, 14), (14, 16),                    # right arm
-    (11, 23), (12, 24),                    # torso sides
-    (23, 24),                              # hips
-    (23, 25), (25, 27),                    # left leg
-    (24, 26), (26, 28),                    # right leg
-    (15, 17), (15, 19), (15, 21),          # left hand
-    (16, 18), (16, 20), (16, 22),          # right hand
-    (27, 29), (27, 31), (29, 31),          # left foot
-    (28, 30), (28, 32), (30, 32),          # right foot
-]
+mpHolistic = mp.solutions.holistic
+mpDrawing  = mp.solutions.drawing_utils
+mpStyles   = mp.solutions.drawing_styles
+
 
 class PoseExtractor:
     def __init__(self):
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
-            model_complexity=1,       # 0=Lite, 1=Full, 2=Heavy
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        self.holistic = mpHolistic.Holistic(
+            model_complexity=1,
+            smooth_landmarks=True,
+            enable_segmentation=False,
+            refine_face_landmarks=True,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
         )
 
     def process_frame(self, frame):
         """
-        Main method — call this once per frame.
-        Returns (landmarks, annotated_frame)
-        landmarks = list of 33 dicts {x, y, z, visibility} or None
-        annotated_frame = frame with skeleton drawn manually using OpenCV
+        Returns (result_dict, annotated_frame)
+        result_dict keys: pose2d, pose3d, face, leftHand, rightHand
+        Each value is a list of {x,y,z,visibility} dicts or None.
+        annotated_frame has skeleton drawn on it.
         """
         h, w = frame.shape[:2]
         annotated = frame.copy()
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         rgb.flags.writeable = False
-        results = self.pose.process(rgb)
+        results = self.holistic.process(rgb)
 
-        if not results.pose_landmarks:
-            return None, annotated
+        def lmList(landmarks, include3d=False):
+            if not landmarks:
+                return None
+            out = []
+            for lm in landmarks.landmark:
+                entry = {"x": lm.x, "y": lm.y, "z": lm.z}
+                if hasattr(lm, "visibility"):
+                    entry["visibility"] = lm.visibility
+                else:
+                    entry["visibility"] = 1.0
+                out.append(entry)
+            return out
 
-        # Extract landmarks
-        landmarks = []
-        for lm in results.pose_landmarks.landmark:
-            landmarks.append({
-                "x": lm.x,
-                "y": lm.y,
-                "z": lm.z,
-                "visibility": lm.visibility
-            })
+        # Build 3D pose from pose_world_landmarks
+        pose3d = None
+        if results.pose_world_landmarks:
+            pose3d = []
+            for lm in results.pose_world_landmarks.landmark:
+                pose3d.append({
+                    "x": lm.x,
+                    "y": lm.y,
+                    "z": lm.z,
+                    "visibility": lm.visibility if hasattr(lm, "visibility") else 1.0,
+                })
 
-        # Convert normalized coords to pixel coords
-        points = []
-        for lm in landmarks:
-            px = int(lm["x"] * w)
-            py = int(lm["y"] * h)
-            points.append((px, py))
+        resultDict = {
+            "pose2d":     lmList(results.pose_landmarks),
+            "pose3d":     pose3d,
+            "face":       lmList(results.face_landmarks),
+            "leftHand":   lmList(results.left_hand_landmarks),
+            "rightHand":  lmList(results.right_hand_landmarks),
+        }
 
-        # Draw connections manually
-        for start_idx, end_idx in POSE_CONNECTIONS:
-            if (landmarks[start_idx]["visibility"] > 0.3 and
-                    landmarks[end_idx]["visibility"] > 0.3):
-                cv2.line(annotated, points[start_idx], points[end_idx],
-                         (0, 255, 0), 2)
+        # Draw overlays on annotated frame
+        mpDrawing.draw_landmarks(
+            annotated,
+            results.pose_landmarks,
+            mpHolistic.POSE_CONNECTIONS,
+            landmark_drawing_spec=mpStyles.get_default_pose_landmarks_style(),
+        )
+        mpDrawing.draw_landmarks(
+            annotated,
+            results.face_landmarks,
+            mpHolistic.FACEMESH_TESSELATION,
+            landmark_drawing_spec=None,
+            connection_drawing_spec=mpStyles.get_default_face_mesh_tesselation_style(),
+        )
+        mpDrawing.draw_landmarks(
+            annotated,
+            results.left_hand_landmarks,
+            mpHolistic.HAND_CONNECTIONS,
+            landmark_drawing_spec=mpStyles.get_default_hand_landmarks_style(),
+            connection_drawing_spec=mpStyles.get_default_hand_connections_style(),
+        )
+        mpDrawing.draw_landmarks(
+            annotated,
+            results.right_hand_landmarks,
+            mpHolistic.HAND_CONNECTIONS,
+            landmark_drawing_spec=mpStyles.get_default_hand_landmarks_style(),
+            connection_drawing_spec=mpStyles.get_default_hand_connections_style(),
+        )
 
-        # Draw landmark dots
-        for i, (px, py) in enumerate(points):
-            if landmarks[i]["visibility"] > 0.3:
-                cv2.circle(annotated, (px, py), 4, (0, 0, 255), -1)
-
-        return landmarks, annotated
-
-
-if __name__ == "__main__":
-    source = sys.argv[1] if len(sys.argv) > 1 else 0
-    cap = cv2.VideoCapture(source)
-
-    if not cap.isOpened():
-        print(f"Error: Could not open source: {source}")
-        sys.exit(1)
-
-    extractor = PoseExtractor()
-    print("Running pose extraction. Press Q to quit.")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("End of stream or failed to read frame.")
-            break
-
-        landmarks, annotated_frame = extractor.process_frame(frame)
-
-        if landmarks:
-            print("First 3 landmarks:")
-            for i, lm in enumerate(landmarks[:3]):
-                print(f"  [{i}] x={lm['x']:.3f} y={lm['y']:.3f} z={lm['z']:.3f} vis={lm['visibility']:.3f}")
-        else:
-            print("No pose detected")
-
-        cv2.imshow("Pose Extraction", annotated_frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+        return resultDict, annotated

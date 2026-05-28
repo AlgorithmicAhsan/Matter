@@ -1,3 +1,9 @@
+// ── AvatarRenderer: Mixamo GLB + Kalidokit holistic rigging ────────────────
+// KEY DIFFERENCE from VRM: Mixamo bones have baked rest-pose rotations.
+// Kalidokit outputs euler angles relative to a T-pose/identity rest.
+// So we must apply kalidokit rotations ON TOP OF the captured rest pose,
+// not replace the bone quaternion directly (which is what VRM can do).
+
 class AvatarRenderer {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -6,18 +12,18 @@ class AvatarRenderer {
         this.scene.background = new THREE.Color(0x1a1a2e);
 
         this.camera = new THREE.PerspectiveCamera(
-            50,
+            35,
             this.container.clientWidth / this.container.clientHeight,
             0.1, 2000
         );
-        this.camera.position.set(0, 160, 320);
-        this.camera.lookAt(0, 80, 0);
+        this.camera.position.set(0, 140, 400);
+        this.camera.lookAt(0, 100, 0);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.shadowMap.enabled = true;
-        this.renderer.outputEncoding = THREE.sRGBEncoding; // critical for GLTF materials
+        this.renderer.outputEncoding = THREE.sRGBEncoding;
         this.renderer.toneMapping = THREE.NoToneMapping;
         this.container.appendChild(this.renderer.domElement);
 
@@ -27,64 +33,90 @@ class AvatarRenderer {
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.target.set(0, 80, 0);
+        this.controls.target.set(0, 100, 0);
         this.controls.update();
 
-        this.model       = null;
-        this.bones       = {};
-        this.restPose    = {};
-        this._modelYOffset = 0; // FIX: store load-time Y offset separately
+        this.model = null;
+        this.bones = {};
+        this.restPose = {};   // captured AFTER model added to scene
+        this._modelYOffset = 0;
 
-        this.worldPosition   = new THREE.Vector3();
-        this.worldRotation   = 0;
-        this.locomotionState = 'idle';
-        this._animClock      = 0;
-        this._lastTime       = performance.now();
-        this._landmarkTimestamp = 0;
-        this._smoothLm = null;
-        
+        // Camera auto-zoom state
+        this._camMode = 'body';
+        this._faceOnlyFrames = 0;
+        this._bodyFrames = 0;
+        this._camThreshold = 20;
+        this._camLerping = false;
+
+        // Target values lerped each frame
+        this._camPosTarget = new THREE.Vector3(0, 140, 400);
+        this._camLookTarget = new THREE.Vector3(0, 100, 0);
+
+        // Mixamo bone name map (humanoid key → mixamorig bone name)
         this.boneMap = {
-            leftArm:      'mixamorigLeftArm',
-            rightArm:     'mixamorigRightArm',
-            leftForeArm:  'mixamorigLeftForeArm',
-            rightForeArm: 'mixamorigRightForeArm',
-            leftUpLeg:    'mixamorigLeftUpLeg',
-            rightUpLeg:   'mixamorigRightUpLeg',
-            leftLeg:      'mixamorigLeftLeg',
-            rightLeg:     'mixamorigRightLeg',
-            leftFoot:     'mixamorigLeftFoot',
-            rightFoot:    'mixamorigRightFoot',
-            spine:        'mixamorigSpine',
-            spine1:       'mixamorigSpine1',
-            spine2:       'mixamorigSpine2',
-            hips:         'mixamorigHips',
+            hips: 'mixamorigHips',
+            spine: 'mixamorigSpine',
+            chest: 'mixamorigSpine1',
+            neck: 'mixamorigNeck',
+            head: 'mixamorigHead',
+
+            leftUpperArm: 'mixamorigLeftArm',
+            leftLowerArm: 'mixamorigLeftForeArm',
+            leftHand: 'mixamorigLeftHand',
+            rightUpperArm: 'mixamorigRightArm',
+            rightLowerArm: 'mixamorigRightForeArm',
+            rightHand: 'mixamorigRightHand',
+
+            leftUpperLeg: 'mixamorigLeftUpLeg',
+            leftLowerLeg: 'mixamorigLeftLeg',
+            leftFoot: 'mixamorigLeftFoot',
+            rightUpperLeg: 'mixamorigRightUpLeg',
+            rightLowerLeg: 'mixamorigRightLeg',
+            rightFoot: 'mixamorigRightFoot',
+
+            // Left fingers
+            leftThumbProximal: 'mixamorigLeftHandThumb1',
+            leftThumbIntermediate: 'mixamorigLeftHandThumb2',
+            leftThumbDistal: 'mixamorigLeftHandThumb3',
+            leftIndexProximal: 'mixamorigLeftHandIndex1',
+            leftIndexIntermediate: 'mixamorigLeftHandIndex2',
+            leftIndexDistal: 'mixamorigLeftHandIndex3',
+            leftMiddleProximal: 'mixamorigLeftHandMiddle1',
+            leftMiddleIntermediate: 'mixamorigLeftHandMiddle2',
+            leftMiddleDistal: 'mixamorigLeftHandMiddle3',
+            leftRingProximal: 'mixamorigLeftHandRing1',
+            leftRingIntermediate: 'mixamorigLeftHandRing2',
+            leftRingDistal: 'mixamorigLeftHandRing3',
+            leftLittleProximal: 'mixamorigLeftHandPinky1',
+            leftLittleIntermediate: 'mixamorigLeftHandPinky2',
+            leftLittleDistal: 'mixamorigLeftHandPinky3',
+
+            // Right fingers
+            rightThumbProximal: 'mixamorigRightHandThumb1',
+            rightThumbIntermediate: 'mixamorigRightHandThumb2',
+            rightThumbDistal: 'mixamorigRightHandThumb3',
+            rightIndexProximal: 'mixamorigRightHandIndex1',
+            rightIndexIntermediate: 'mixamorigRightHandIndex2',
+            rightIndexDistal: 'mixamorigRightHandIndex3',
+            rightMiddleProximal: 'mixamorigRightHandMiddle1',
+            rightMiddleIntermediate: 'mixamorigRightHandMiddle2',
+            rightMiddleDistal: 'mixamorigRightHandMiddle3',
+            rightRingProximal: 'mixamorigRightHandRing1',
+            rightRingIntermediate: 'mixamorigRightHandRing2',
+            rightRingDistal: 'mixamorigRightHandRing3',
+            rightLittleProximal: 'mixamorigRightHandPinky1',
+            rightLittleIntermediate: 'mixamorigRightHandPinky2',
+            rightLittleDistal: 'mixamorigRightHandPinky3',
         };
 
-        // Leg swing sign — +1 or -1, auto-detected after model loads
-        // (some Mixamo exports have inverted local X for leg bones)
-        this._legSign = 1;
-
-        // 'direct' = live landmark-to-bone translation
-        // 'gesture' = action/gesture-driven procedural animation
-        this.translationMode = 'direct';
-
+        this._clock = new THREE.Clock();
         this._loadModel();
         this._animate();
         window.addEventListener('resize', () => this._onWindowResize());
     }
 
-    setTranslationMode(mode) {
-        this.translationMode = mode;
-        if (mode !== 'direct') {
-            // Reset landmark timestamp so hasLivePose immediately goes false
-            this._landmarkTimestamp = 0;
-            this._smoothLm = null;
-        }
-        console.log('[AvatarRenderer] Translation mode set to:', mode);
-    }
-
+    // ── Lighting ─────────────────────────────────────────────────────────────
     _setupLighting() {
-        // Very bright ambient — GLTF PBR needs this
         this.scene.add(new THREE.AmbientLight(0xffffff, 4.0));
 
         const key = new THREE.DirectionalLight(0xffffff, 5.0);
@@ -92,9 +124,9 @@ class AvatarRenderer {
         key.castShadow = true;
         key.shadow.mapSize.setScalar(1024);
         key.shadow.camera.near = 1;
-        key.shadow.camera.far  = 600;
+        key.shadow.camera.far = 600;
         key.shadow.camera.left = key.shadow.camera.bottom = -200;
-        key.shadow.camera.right = key.shadow.camera.top   =  200;
+        key.shadow.camera.right = key.shadow.camera.top = 200;
         this.scene.add(key);
 
         const fill = new THREE.DirectionalLight(0xffeedd, 3.0);
@@ -107,8 +139,7 @@ class AvatarRenderer {
     }
 
     _buildEnvironment() {
-        const grid = new THREE.GridHelper(1000, 40, 0x334477, 0x223366);
-        this.scene.add(grid);
+        this.scene.add(new THREE.GridHelper(1000, 40, 0x334477, 0x223366));
 
         const floor = new THREE.Mesh(
             new THREE.PlaneGeometry(1000, 1000),
@@ -119,33 +150,29 @@ class AvatarRenderer {
         this.scene.add(floor);
     }
 
+    // ── Model loading ─────────────────────────────────────────────────────────
     _loadModel() {
         const loader = new THREE.GLTFLoader();
         loader.load('/models/avatar.glb', (gltf) => {
             this.model = gltf.scene;
-            this.model.rotation.y = Math.PI; // face camera
+            this.model.rotation.y = Math.PI;
 
-            // Scale to ~150 units
-            const box1  = new THREE.Box3().setFromObject(this.model);
-            const size  = box1.getSize(new THREE.Vector3());
+            const box1 = new THREE.Box3().setFromObject(this.model);
+            const size = box1.getSize(new THREE.Vector3());
             const scale = 150 / size.y;
             this.model.scale.setScalar(scale);
 
-            // Centre + ground the feet
-            const box2   = new THREE.Box3().setFromObject(this.model);
+            const box2 = new THREE.Box3().setFromObject(this.model);
             const centre = box2.getCenter(new THREE.Vector3());
             this.model.position.x = -centre.x;
             this.model.position.z = -centre.z;
-
-            // FIX: store Y offset — setWorldTransform will ADD this, not override it
-            this._modelYOffset    = -box2.min.y;
+            this._modelYOffset = -box2.min.y;
             this.model.position.y = this._modelYOffset;
 
             this.model.traverse((child) => {
                 if (child.isMesh || child.isSkinnedMesh) {
-                    child.castShadow    = true;
+                    child.castShadow = true;
                     child.receiveShadow = true;
-                    // FIX: override bounding sphere so model never disappears on zoom-out
                     if (child.geometry) {
                         child.geometry.boundingSphere = new THREE.Sphere(
                             new THREE.Vector3(0, 75, 0), 300
@@ -158,234 +185,205 @@ class AvatarRenderer {
 
             this.scene.add(this.model);
 
-            // Capture rest pose AFTER model is in scene
+            // CRITICAL: capture rest pose AFTER model is in scene and transforms settled
+            // These are the Mixamo baked-in rotations we must preserve as base
             Object.keys(this.bones).forEach(n => {
                 this.restPose[n] = this.bones[n].quaternion.clone();
             });
 
-            const overlay = document.getElementById('loading-overlay');
-            if (overlay) overlay.style.display = 'none';
-
             console.log('Avatar loaded. Bones:', Object.keys(this.bones).length);
+            console.log('Sample bone names:', Object.keys(this.bones).slice(0, 8));
+
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.style.display = 'none';
         },
-        (p) => {
-            if (p.total > 0) {
-                const el = document.getElementById('loading-pct');
-                if (el) el.textContent = Math.round(p.loaded / p.total * 100) + '%';
-            }
-        },
-        (e) => console.error('Avatar error:', e));
+            (p) => {
+                if (p.total > 0) {
+                    const el = document.getElementById('loadingPct');
+                    if (el) el.textContent = Math.round(p.loaded / p.total * 100) + '%';
+                }
+            },
+            (e) => console.error('Avatar load error:', e));
     }
 
-    // Called every frame by ActionController
-    setWorldTransform(position, rotationRad, locomotionState) {
-        this.worldPosition.copy(position);
-        this.worldRotation   = rotationRad;
-        this.locomotionState = locomotionState || 'idle';
+    // ── Core rig helper ───────────────────────────────────────────────────────
+    // For Mixamo rigs: multiply rest pose by the kalidokit euler offset.
+    // This means "start from the baked rest orientation, then rotate by kalidokit's delta".
+    // Direct setFromEuler (like VRM does) destroys the baked rest and causes the T-pose collapse.
+    //
+    // MIRROR FIX: model.rotation.y = PI flips the world-space Z axis for limb bones.
+    // Kalidokit's rigArm output uses Z as the primary arm-raise axis (scaled -2.3 * invert).
+    // With the 180° model rotation, positive Z in bone-local = backward in world, so we
+    // negate Z for upper/lower arm and leg bones only.
+    // Hand and foot bones are excluded — their wrist/ankle Z (roll) works correctly as-is.
+    _zFlipBones = new Set([
+        'leftUpperArm', 'leftLowerArm',
+        'rightUpperArm', 'rightLowerArm',
+        'leftUpperLeg', 'leftLowerLeg',
+        'rightUpperLeg', 'rightLowerLeg',
+    ]);
 
-        if (this.model) {
-            this.model.position.x = position.x;
-            // FIX: always ADD the load-time Y offset on top of world Y
-            this.model.position.y = position.y + this._modelYOffset;
-            this.model.position.z = position.z;
-            this.model.rotation.y = Math.PI + rotationRad;
-        }
-
-        this.controls.target.lerp(
-            new THREE.Vector3(position.x, position.y + 80, position.z), 0.1
-        );
-    }
-
-    // Called when MediaPipe landmarks arrive
-    updatePose(landmarks) {
-        if (this.translationMode !== 'direct') return;
-        if (!this.model || !landmarks || landmarks.length < 29) return;
-        if (!Object.keys(this.bones).length) return;
-
-        this._landmarkTimestamp = performance.now();
-
-        const alpha = 0.18;
-        if (!this._smoothLm) {
-            this._smoothLm = landmarks.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
-        } else {
-            for (let i = 0; i < landmarks.length; i++) {
-                this._smoothLm[i].x += alpha * (landmarks[i].x - this._smoothLm[i].x);
-                this._smoothLm[i].y += alpha * (landmarks[i].y - this._smoothLm[i].y);
-                this._smoothLm[i].z += alpha * (landmarks[i].z - this._smoothLm[i].z);
-            }
-        }
-
-        const j = this._smoothLm;
-        const v = (lm) => new THREE.Vector3(lm.x - 0.5, -lm.y, -lm.z * 0.5);
-        // For legs, ignore Z depth entirely — MediaPipe leg depth is too noisy
-        // and causes bones to rotate in the sagittal (front-back) plane incorrectly.
-        const vLeg = (lm) => new THREE.Vector3(lm.x - 0.5, -lm.y, 0);
-
-        // Arms
-        this._aimBone(this.boneMap.leftArm,      v(j[11]), v(j[13]));
-        this._aimBone(this.boneMap.leftForeArm,  v(j[13]), v(j[15]));
-        this._aimBone(this.boneMap.rightArm,     v(j[12]), v(j[14]));
-        this._aimBone(this.boneMap.rightForeArm, v(j[14]), v(j[16]));
-
-        // Legs (heavy smoothing 0.1 to prevent depth jitter when crouching)
-        this._aimBone(this.boneMap.leftUpLeg,  vLeg(j[23]), vLeg(j[25]), 0.1, true);
-        this._aimBone(this.boneMap.leftLeg,    vLeg(j[25]), vLeg(j[27]), 0.1, true);
-        this._aimBone(this.boneMap.rightUpLeg, vLeg(j[24]), vLeg(j[26]), 0.1, true);
-        this._aimBone(this.boneMap.rightLeg,   vLeg(j[26]), vLeg(j[28]), 0.1, true);
-
-        // Spine
-        const hipMid = v(j[23]).clone().add(v(j[24])).multiplyScalar(0.5);
-        const shdMid = v(j[11]).clone().add(v(j[12])).multiplyScalar(0.5);
-        this._aimBone(this.boneMap.spine, hipMid, shdMid);
-    }
-
-    _applyLocomotionAnim(dt) {
-        this._animClock += dt;
-        const t     = this._animClock;
-        const state = this.locomotionState;
-        const s     = this._legSign;
-        const hasLivePose = (performance.now() - this._landmarkTimestamp) < 500;
-        // When live landmarks are driving bones directly, procedural animation
-        // must not fight them. In gesture mode, livePoseActive is always false.
-        const livePoseActive = hasLivePose && this.translationMode === 'direct';
-
-        // Blend a local Euler offset ON TOP of the bone's rest quaternion
-        const blendBone = (name, ex, ey, ez, alpha = 0.3) => {
-            const bone = this.bones[name];
-            const rest = this.restPose[name];
-            if (!bone || !rest) return;
-            const offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(ex, ey, ez));
-            bone.quaternion.slerp(rest.clone().multiply(offset), alpha);
-        };
-
-        const returnToRest = (name, alpha = 0.06) => {
-            const bone = this.bones[name];
-            const rest = this.restPose[name];
-            if (!bone || !rest) return;
-            bone.quaternion.slerp(rest, alpha);
-        };
-
-        if (state === 'idle') {
-            const b = Math.sin(t * 1.1) * 0.012;
-            blendBone(this.boneMap.spine1, b, 0, 0, 0.04);
-            
-            // Bring arms down to sides (Natural pose) — only if no live landmark data
-            if (!livePoseActive) {
-                blendBone(this.boneMap.leftArm,  0, 0,  1.5, 0.08);
-                blendBone(this.boneMap.rightArm, 0, 0,  1.5, 0.08); 
-                blendBone(this.boneMap.leftForeArm, 0.2, 0, 0, 0.08);
-                blendBone(this.boneMap.rightForeArm, 0.2, 0, 0, 0.08);
-            }
-
-            if (!livePoseActive) {
-                [this.boneMap.leftUpLeg, this.boneMap.rightUpLeg,
-                 this.boneMap.leftLeg,   this.boneMap.rightLeg,
-                 this.boneMap.leftFoot,  this.boneMap.rightFoot,
-                 this.boneMap.spine].forEach(n => returnToRest(n));
-            }
-
-        } else if (state === 'walk' || state === 'run') {
-            const freq  = state === 'run' ? 4.0 : 2.5;
-            const swing = state === 'run' ? 0.65 : 0.4;
-            const knee  = state === 'run' ? 0.70 : 0.40;
-            const foot  = state === 'run' ? 0.30 : 0.15;
-            const arm   = state === 'run' ? 0.6 : 0.35;
-            const alpha = 0.4;
-
-            const phase = Math.sin(t * freq);
-
-            // ── Legs: procedural only when no live pose data ──
-            if (!livePoseActive) {
-                blendBone(this.boneMap.leftUpLeg,   s *  phase * swing, 0, 0, alpha);
-                blendBone(this.boneMap.rightUpLeg,  s * -phase * swing, 0, 0, alpha);
-
-                const lKnee = Math.max(0, -phase) * knee;
-                const rKnee = Math.max(0,  phase) * knee;
-                blendBone(this.boneMap.leftLeg,  lKnee, 0, 0, alpha);
-                blendBone(this.boneMap.rightLeg, rKnee, 0, 0, alpha);
-
-                blendBone(this.boneMap.leftFoot,  -lKnee * foot, 0, 0, alpha);
-                blendBone(this.boneMap.rightFoot, -rKnee * foot, 0, 0, alpha);
-            }
-
-            // ── Arms: Swing fore/aft — only if no live landmark data ──
-            if (!livePoseActive) {
-                // Pulling both arms forward: negative offsets on both sides
-                // since positive Y rotation was biased backward on this rig.
-                const armDown = 1.5;
-                const lSwing = (phase * arm) - 0.25; 
-                const rSwing = (phase * arm) - 0.15; 
-
-                blendBone(this.boneMap.leftArm,   0,  lSwing, armDown, 0.25);
-                blendBone(this.boneMap.rightArm,  0,  rSwing, armDown, 0.25);
-                
-                // Forearms slightly bent
-                blendBone(this.boneMap.leftForeArm,  0.3, 0, 0, 0.1);
-                blendBone(this.boneMap.rightForeArm, 0.3, 0, 0, 0.1);
-            }
-
-            // Slight counter-rotation in spine
-            blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
-
-        } else if (state === 'crouch') {
-            blendBone(this.boneMap.spine,      0.15, 0, 0,     0.15);
-            blendBone(this.boneMap.leftUpLeg,  0.35, 0,  0.04, 0.15);
-            blendBone(this.boneMap.rightUpLeg, 0.35, 0, -0.04, 0.15);
-            blendBone(this.boneMap.leftLeg,    1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.rightLeg,   1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.leftFoot,  -0.50, 0, 0,     0.15);
-            blendBone(this.boneMap.rightFoot, -0.50, 0, 0,     0.15);
-            if (!livePoseActive) {
-                blendBone(this.boneMap.leftArm,  0, 0, 1.5, 0.15);
-                blendBone(this.boneMap.rightArm, 0, 0, 1.5, 0.15);
-            }
-
-        } else if (state === 'jump') {
-            if (!livePoseActive) {
-                blendBone(this.boneMap.leftArm,    0, 0, 0.6, 0.25);
-                blendBone(this.boneMap.rightArm,   0, 0, 0.6, 0.25);
-                blendBone(this.boneMap.leftUpLeg,  -0.4, 0, 0, 0.25);
-                blendBone(this.boneMap.rightUpLeg, -0.4, 0, 0, 0.25);
-                blendBone(this.boneMap.leftLeg,    0.7, 0, 0, 0.25);
-                blendBone(this.boneMap.rightLeg,   0.7, 0, 0, 0.25);
-            }
-        }
-    }
-
-
-    _aimBone(boneName, fromVec, toVec, alpha = 0.35, useRestDir = false) {
+    _rigRotation(humanoidKey, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmt = 0.3) {
+        const boneName = this.boneMap[humanoidKey];
+        if (!boneName) return;
         const bone = this.bones[boneName];
         const rest = this.restPose[boneName];
         if (!bone || !rest) return;
 
-        const dir = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
-        if (dir.length() < 0.001) return;
+        const zSign = this._zFlipBones.has(humanoidKey) ? -1 : 1;
 
-        const parentQ = new THREE.Quaternion();
-        if (bone.parent) bone.parent.getWorldQuaternion(parentQ);
-        const localDir = dir.clone().applyQuaternion(parentQ.invert());
-
-        let targetQ;
-        if (useRestDir) {
-            // Use bone's actual rest direction to avoid antiparallel singularity.
-            // Only needed for leg bones whose rest direction is ~(0,-1,0).
-            const restDir = new THREE.Vector3(0, 1, 0).applyQuaternion(rest).normalize();
-            const deltaQ = new THREE.Quaternion().setFromUnitVectors(restDir, localDir.normalize());
-            targetQ = deltaQ.multiply(rest.clone());
-        } else {
-            targetQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), localDir);
-        }
-
-        bone.quaternion.slerp(targetQ, alpha);
+        const euler = new THREE.Euler(
+            rotation.x * dampener,
+            rotation.y * dampener,
+            zSign * rotation.z * dampener,
+            'XYZ'
+        );
+        const offsetQ = new THREE.Quaternion().setFromEuler(euler);
+        const targetQ = rest.clone().multiply(offsetQ);
+        bone.quaternion.slerp(targetQ, lerpAmt);
     }
 
+    // ── Apply rigged data from Kalidokit ──────────────────────────────────────
+    applyHolisticResults(riggedPose, riggedFace, riggedLeftHand, riggedRightHand) {
+        if (!this.model || !Object.keys(this.restPose).length) return;
+
+        // ── Pose ──────────────────────────────────────────────────────────────
+        if (riggedPose) {
+            this._rigRotation('hips', riggedPose.Hips.rotation, 0.7, 0.07);
+
+            // Keep model grounded — X/Z sway only from hips, no Y
+            if (riggedPose.Hips.position) {
+                const hx = -riggedPose.Hips.position.x * 60;
+                const hz = -riggedPose.Hips.position.z * 60;
+                this.model.position.x += (hx - this.model.position.x) * 0.1;
+                this.model.position.y = this._modelYOffset;
+                this.model.position.z += (hz - this.model.position.z) * 0.1;
+            }
+
+            this._rigRotation('chest', riggedPose.Spine, 0.25, 0.3);
+            this._rigRotation('spine', riggedPose.Spine, 0.45, 0.3);
+
+            this._rigRotation('rightUpperArm', riggedPose.RightUpperArm, 1, 0.3);
+            this._rigRotation('rightLowerArm', riggedPose.RightLowerArm, 1, 0.3);
+            this._rigRotation('leftUpperArm', riggedPose.LeftUpperArm, 1, 0.3);
+            this._rigRotation('leftLowerArm', riggedPose.LeftLowerArm, 1, 0.3);
+
+            this._rigRotation('leftUpperLeg', riggedPose.LeftUpperLeg, 1, 0.3);
+            this._rigRotation('leftLowerLeg', riggedPose.LeftLowerLeg, 1, 0.3);
+            this._rigRotation('rightUpperLeg', riggedPose.RightUpperLeg, 1, 0.3);
+            this._rigRotation('rightLowerLeg', riggedPose.RightLowerLeg, 1, 0.3);
+        }
+
+        // ── Face / Head / Neck ────────────────────────────────────────────────
+        if (riggedFace) {
+            this._rigRotation('neck', riggedFace.head, 0.7, 0.3);
+            this._rigRotation('head', riggedFace.head, 0.3, 0.3);
+        }
+
+        // ── Hands ─────────────────────────────────────────────────────────────
+        if (riggedLeftHand && riggedPose) {
+            this._rigRotation('leftHand', {
+                z: riggedPose.LeftHand ? riggedPose.LeftHand.z : 0,
+                y: riggedLeftHand.LeftWrist.y,
+                x: riggedLeftHand.LeftWrist.x,
+            }, 1, 0.3);
+            this._applyFingers(riggedLeftHand, 'left');
+        }
+        if (riggedRightHand && riggedPose) {
+            this._rigRotation('rightHand', {
+                z: riggedPose.RightHand ? riggedPose.RightHand.z : 0,
+                y: riggedRightHand.RightWrist.y,
+                x: riggedRightHand.RightWrist.x,
+            }, 1, 0.3);
+            this._applyFingers(riggedRightHand, 'right');
+        }
+    }
+
+    _applyFingers(riggedHand, side) {
+        const capSide = side === 'left' ? 'Left' : 'Right';
+        const fingers = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'];
+        const joints = ['Proximal', 'Intermediate', 'Distal'];
+        for (const finger of fingers) {
+            for (const joint of joints) {
+                const kKey = `${capSide}${finger}${joint}`;
+                const bKey = `${side}${finger}${joint}`;
+                if (riggedHand[kKey]) {
+                    this._rigRotation(bKey, riggedHand[kKey], 1, 0.3);
+                }
+            }
+        }
+    }
+
+    // ── Smart camera zoom ─────────────────────────────────────────────────────
+    // OrbitControls stores camera position as internal spherical coords (r, theta, phi).
+    // controls.update() recomputes camera.position from those sphericals every frame —
+    // so any position.lerp() we do gets immediately overwritten.
+    // Fix: when mode changes, disable controls entirely, drive camera directly with lerp
+    // + lookAt, then re-enable + update ONCE at the end so controls re-syncs its
+    // internal sphericals from the new position instead of the stale ones.
+    updateCameraMode(faceOnly) {
+        if (faceOnly) {
+            this._faceOnlyFrames++;
+            this._bodyFrames = 0;
+        } else {
+            this._bodyFrames++;
+            this._faceOnlyFrames = 0;
+        }
+
+        const prevMode = this._camMode;
+        if (this._camMode === 'body' && this._faceOnlyFrames >= this._camThreshold) {
+            this._camMode = 'face';
+        } else if (this._camMode === 'face' && this._bodyFrames >= this._camThreshold) {
+            this._camMode = 'body';
+        }
+
+        // Only kick off a lerp when mode actually flips
+        if (this._camMode !== prevMode) {
+            this.controls.enabled = false;
+            this._camLerping = true;
+
+            let headY = 140;
+            const headBone = this.bones[this.boneMap.head];
+            if (headBone) {
+                const wp = new THREE.Vector3();
+                headBone.getWorldPosition(wp);
+                if (wp.y > 10) headY = wp.y;
+            }
+
+            if (this._camMode === 'face') {
+                this._camPosTarget.set(0, headY, 90);
+                this._camLookTarget.set(0, headY - 8, 0);
+            } else {
+                this._camPosTarget.set(0, 140, 400);
+                this._camLookTarget.set(0, 100, 0);
+            }
+        }
+    }
+
+    // ── Render loop ───────────────────────────────────────────────────────────
     _animate = () => {
         requestAnimationFrame(this._animate);
-        const now = performance.now();
-        const dt  = Math.min((now - this._lastTime) / 1000, 0.05);
-        this._lastTime = now;
-        if (this.model) this._applyLocomotionAnim(dt);
-        this.controls.update();
+
+        if (this._camLerping) {
+            const speed = 0.07;
+            this.camera.position.lerp(this._camPosTarget, speed);
+            this.controls.target.lerp(this._camLookTarget, speed);
+            this.camera.lookAt(this.controls.target);
+
+            if (this.camera.position.distanceTo(this._camPosTarget) < 2 &&
+                this.controls.target.distanceTo(this._camLookTarget) < 2) {
+                // Snap exact, then re-sync OrbitControls' internal spherical state
+                this.camera.position.copy(this._camPosTarget);
+                this.controls.target.copy(this._camLookTarget);
+                this.camera.lookAt(this.controls.target);
+                this.controls.enabled = true;
+                this.controls.update();
+                this._camLerping = false;
+            }
+        } else {
+            this.controls.update();
+        }
+
         this.renderer.render(this.scene, this.camera);
     }
 

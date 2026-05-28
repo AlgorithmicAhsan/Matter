@@ -1,25 +1,9 @@
 # PosiSim Backend Dependencies
-# Install with: pip install -r requirements.txt
 
-# Core Computer Vision & Pose Detection
-mediapipe==0.10.21        # Updated to support newer protobuf versions
-
-# Web Framework & Server
-fastapi>=0.95.0              # Modern Python web framework
-uvicorn[standard]>=0.20.0    # ASGI server for FastAPI
-
-# Real-time Communication
-websockets>=11.0             # WebSocket server for live data streaming
-
-# Numerical Computing
-numpy>=1.21.0                # NumPy - mathematical operations, arrays
-
-pygame 
-
-# HTTP & Form Handling
-python-multipart>=0.0.5      # Multipart form data handling for FastAPI
-
-# Optional: For development
-# pytest>=7.0.0              # Testing framework
-# black>=22.0.0              # Code formatter
-# flake8>=4.0.0              # Code linter
+mediapipe>=0.10.21
+fastapi>=0.95.0
+uvicorn[standard]>=0.20.0
+websockets>=11.0
+numpy>=1.21.0
+python-multipart>=0.0.5
+opencv-python>=4.5.0

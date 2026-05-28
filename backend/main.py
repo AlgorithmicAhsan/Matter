@@ -15,60 +15,52 @@ from fastapi.staticfiles import StaticFiles
 from pose import PoseExtractor
 from uncertainty import UncertaintyScorer
 from bvh_writer import BVHWriter
-from actions import ActionController, ActionConfig, KeyboardController
-from action_detector import PoseActionDetector          # NEW
 
 app = FastAPI(title="PosiSim - Markerless Motion Capture")
 
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
-MODELS_DIR   = Path(__file__).parent.parent / "models"
-OUTPUT_DIR   = Path(__file__).parent.parent / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+frontendDir = Path(__file__).parent.parent / "frontend"
+modelsDir   = Path(__file__).parent.parent / "models"
+outputDir   = Path(__file__).parent.parent / "output"
+outputDir.mkdir(exist_ok=True)
 
-app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
-app.mount("/models",   StaticFiles(directory=str(MODELS_DIR)),   name="models")
-app.mount("/output",   StaticFiles(directory=str(OUTPUT_DIR)),   name="output")
+app.mount("/frontend", StaticFiles(directory=str(frontendDir)), name="frontend")
+app.mount("/models",   StaticFiles(directory=str(modelsDir)),   name="models")
+app.mount("/output",   StaticFiles(directory=str(outputDir)),   name="output")
 
-CAMERA_SOURCE = 0
+cameraSource = 0
 
 
 class SessionState:
     def __init__(self):
-        self.extractor    = PoseExtractor()
-        self.scorer       = UncertaintyScorer()
-        self.writer       = BVHWriter(fps=30)
-        self.cap          = None
-        self.recording    = False
-        self.running      = False
-        self.source       = CAMERA_SOURCE
-        self.last_landmarks = None
-        self.frame_count  = 0
+        self.extractor  = PoseExtractor()
+        self.scorer     = UncertaintyScorer()
+        self.writer     = BVHWriter(fps=30)
+        self.cap        = None
+        self.recording  = False
+        self.running    = False
+        self.source     = cameraSource
+        self.frameCount = 0
 
-        self.action_ctrl   = ActionController(ActionConfig())
-        self.keyboard_ctrl = KeyboardController(self.action_ctrl)
-        self.pose_detector = PoseActionDetector()       # NEW
-        self.pose_mode     = False                      # NEW: toggled by frontend
-        self._last_update_time = time.time()
 
 state = SessionState()
 
 
 @app.get("/")
 async def root():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return FileResponse(str(frontendDir / "index.html"))
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "recording": state.recording, "frames": len(state.writer.frames)}
 
 @app.get("/output/list")
-async def list_outputs():
-    files = list(OUTPUT_DIR.glob("*.bvh"))
+async def listOutputs():
+    files = list(outputDir.glob("*.bvh"))
     return {"files": [f.name for f in sorted(files, reverse=True)]}
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocketEndpoint(websocket: WebSocket):
     await websocket.accept()
     print("Client connected.")
 
@@ -78,15 +70,15 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
         return
 
-    state.running     = True
-    state.frame_count = 0
+    state.running    = True
+    state.frameCount = 0
 
     try:
         while state.running:
             try:
                 data    = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
                 command = json.loads(data)
-                await handle_command(command, websocket)
+                await handleCommand(command, websocket)
             except asyncio.TimeoutError:
                 pass
             except WebSocketDisconnect:
@@ -100,78 +92,40 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     break
 
-            landmarks, annotated = state.extractor.process_frame(frame)
-            
-            # --- DEBUG LOGS BEFORE UNCERTAINTY ---
-            print(f"--- FRAME {state.frame_count + 1} ---")
-            if landmarks and len(landmarks) > 24:
-                hip_y = (landmarks[23]['y'] + landmarks[24]['y']) / 2
-                print(f"[DEBUG MAIN] Raw Landmarks - Hip Y: {hip_y:.4f}")
-            else:
-                print(f"[DEBUG MAIN] Raw Landmarks - Invalid or None")
+            resultDict, annotated = state.extractor.process_frame(frame)
 
-            uncertainty_result   = state.scorer.score(landmarks)
-            
-            # --- DEBUG LOGS AFTER UNCERTAINTY ---
-            print(f"[DEBUG MAIN] Uncertainty Trusted: {uncertainty_result['trusted']} | Total Uncertainty: {uncertainty_result['total']:.4f}")
-            
-            state.last_landmarks = landmarks
-            state.frame_count   += 1
+            # Uncertainty scoring uses pose2d landmarks (same format as before)
+            pose2d = resultDict.get("pose2d")
+            uncertaintyResult = state.scorer.score(pose2d)
 
-            # ── Action tick ──────────────────────────────────────────────────
-            now = time.time()
-            dt  = min(now - state._last_update_time, 0.05)
-            state._last_update_time = now
+            state.frameCount += 1
 
-            pose_transform = None
-            detected = []
-            if state.pose_mode:
-                # Discrete: CROUCH / JUMP only - calibration happens inside if not yet done
-                detected = state.pose_detector.detect_actions(landmarks)
-                _sync_pose_actions(detected)
-                # Continuous: rotation, X position, walking - only if calibrated
-                if state.pose_detector.is_calibrated():
-                    pose_transform = state.pose_detector.compute_pose_transform(landmarks)
-
-            velocity, rotation_delta = state.action_ctrl.update(dt)
-            state.action_ctrl.position += velocity * dt
-            state.action_ctrl.rotation += rotation_delta
-
-            # ── Encode frame ─────────────────────────────────────────────────
-            _, buffer    = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            frame_base64 = base64.b64encode(buffer).decode("utf-8")
-
+            # BVH recording still uses pose2d landmarks
             if state.recording:
-                state.writer.add_frame(landmarks, trusted=uncertainty_result["trusted"])
+                state.writer.add_frame(pose2d, trusted=uncertaintyResult["trusted"])
+
+            _, buffer    = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            frameBase64  = base64.b64encode(buffer).decode("utf-8")
 
             payload = {
-                "frame":       state.frame_count,
-                "recording":   state.recording,
-                "image":       frame_base64,
-                "bvh_frames":  len(state.writer.frames),
-                "bvh_skipped": state.writer.skipped,
+                "frame":      state.frameCount,
+                "recording":  state.recording,
+                "image":      frameBase64,
+                "bvhFrames":  len(state.writer.frames),
+                "bvhSkipped": state.writer.skipped,
                 "uncertainty": {
-                    "aleatoric": uncertainty_result["aleatoric"],
-                    "epistemic": uncertainty_result["epistemic"],
-                    "total":     uncertainty_result["total"],
-                    "trusted":   uncertainty_result["trusted"],
+                    "aleatoric": uncertaintyResult["aleatoric"],
+                    "epistemic": uncertaintyResult["epistemic"],
+                    "total":     uncertaintyResult["total"],
+                    "trusted":   uncertaintyResult["trusted"],
                 },
-                "landmarks":      landmarks if landmarks else None,
-                "pose_transform":  pose_transform,
-                "avatar":         state.action_ctrl.get_state_dict(),
-                "detected_actions": [a.value for a in detected],
-                # Calibration state for the frontend UI
-                "pose_mode":      state.pose_mode,
-                "calibrated":     state.pose_detector.is_calibrated(),
-                "calib_progress": round(state.pose_detector.calibration_progress(), 3),
+                # All landmark streams for Kalidokit in browser
+                "pose2d":   resultDict["pose2d"],
+                "pose3d":   resultDict["pose3d"],
+                "face":     resultDict["face"],
+                "leftHand": resultDict["leftHand"],
+                "rightHand":resultDict["rightHand"],
             }
-
-            if state.frame_count % 100 == 0:
-                print(
-                    f"Frame {state.frame_count} | "
-                    f"pose_mode={state.pose_mode} | "
-                    f"calibrated={state.pose_detector.is_calibrated()}"
-                )
 
             await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(1 / 30)
@@ -187,28 +141,7 @@ async def websocket_endpoint(websocket: WebSocket):
         print("Camera released.")
 
 
-def _sync_pose_actions(detected_actions):
-    """
-    Apply pose-detected actions into the ActionController.
-    Only touches pose-owned actions — keyboard actions are left alone.
-    """
-    from actions import ActionType
-    POSE_OWNED = {
-        ActionType.MOVE_FORWARD, ActionType.MOVE_BACKWARD,
-        ActionType.STRAFE_LEFT,  ActionType.STRAFE_RIGHT,
-        ActionType.TURN_LEFT,    ActionType.TURN_RIGHT,
-        ActionType.CROUCH,       ActionType.SPRINT,
-        ActionType.JUMP,
-    }
-    detected_set = set(detected_actions)
-    for action in POSE_OWNED:
-        if action in detected_set:
-            state.action_ctrl.activate_action(action)
-        else:
-            state.action_ctrl.deactivate_action(action)
-
-
-async def handle_command(command: dict, websocket: WebSocket):
+async def handleCommand(command: dict, websocket: WebSocket):
     action = command.get("action")
 
     if action == "start_recording":
@@ -232,11 +165,11 @@ async def handle_command(command: dict, websocket: WebSocket):
         filename = Path(filepath).name if filepath else None
         print(f"BVH saved: {filename}")
         await websocket.send_text(json.dumps({
-            "event":        "bvh_saved",
-            "filename":     filename,
-            "frames":       len(state.writer.frames),
-            "skipped":      state.writer.skipped,
-            "coverage_pct": round(
+            "event":       "bvh_saved",
+            "filename":    filename,
+            "frames":      len(state.writer.frames),
+            "skipped":     state.writer.skipped,
+            "coveragePct": round(
                 len(state.writer.frames) /
                 max(len(state.writer.frames) + state.writer.skipped, 1) * 100, 1
             ),
@@ -248,32 +181,6 @@ async def handle_command(command: dict, websocket: WebSocket):
             state.cap.release()
         state.cap = cv2.VideoCapture(state.source)
         print(f"Source set to: {state.source}")
-
-    elif action == "key_down":
-        state.keyboard_ctrl.key_down(command.get("key", ""))
-
-    elif action == "key_up":
-        state.keyboard_ctrl.key_up(command.get("key", ""))
-
-    elif action == "set_pose_mode":
-        # Frontend toggles pose-driven control on/off
-        state.pose_mode = bool(command.get("enabled", False))
-        if state.pose_mode:
-            print("Pose mode ON — calibrating..." if not state.pose_detector.is_calibrated() else "Pose mode ON.")
-        else:
-            print("Pose mode OFF — keyboard only.")
-        await websocket.send_text(json.dumps({
-            "event":     "pose_mode_changed",
-            "pose_mode": state.pose_mode,
-        }))
-
-    elif action == "reset_calibration":
-        state.pose_detector.reset_calibration()
-        await websocket.send_text(json.dumps({"event": "calibration_reset"}))
-
-    elif action == "get_coverage":
-        stats = state.scorer.coverage_stats()
-        await websocket.send_text(json.dumps({"event": "coverage_stats", "stats": stats}))
 
 
 if __name__ == "__main__":
