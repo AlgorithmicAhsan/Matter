@@ -191,6 +191,11 @@ class AvatarRenderer {
                 this.restPose[n] = this.bones[n].quaternion.clone();
             });
 
+            // Model facing quaternion (root rotation.y = PI). Kalidokit rotations are
+            // expressed relative to a model-facing VRM rest, so we map them through this.
+            this._faceQ = this.model.getWorldQuaternion(new THREE.Quaternion());
+            this._faceQInv = this._faceQ.clone().invert();
+
             console.log('Avatar loaded. Bones:', Object.keys(this.bones).length);
             console.log('Sample bone names:', Object.keys(this.bones).slice(0, 8));
 
@@ -206,41 +211,46 @@ class AvatarRenderer {
             (e) => console.error('Avatar load error:', e));
     }
 
-    // ── Core rig helper ───────────────────────────────────────────────────────
-    // For Mixamo rigs: multiply rest pose by the kalidokit euler offset.
-    // This means "start from the baked rest orientation, then rotate by kalidokit's delta".
-    // Direct setFromEuler (like VRM does) destroys the baked rest and causes the T-pose collapse.
+    // ── Core rig helper (VRM → Mixamo retarget) ────────────────────────────────
+    // Kalidokit emits rotations in VRM convention: each bone's rest local frame is
+    // world/model-aligned, so the VRM sample just does bone.quaternion = euler(Rk).
+    // Mixamo bones have baked rest rotations AND limb-local axes rotated ~90° from
+    // VRM's, so applying Rk in the bone's own local frame (rest * Rk) twists the arms.
     //
-    // MIRROR FIX: model.rotation.y = PI flips the world-space Z axis for limb bones.
-    // Kalidokit's rigArm output uses Z as the primary arm-raise axis (scaled -2.3 * invert).
-    // With the 180° model rotation, positive Z in bone-local = backward in world, so we
-    // negate Z for upper/lower arm and leg bones only.
-    // Hand and foot bones are excluded — their wrist/ankle Z (roll) works correctly as-is.
-    _zFlipBones = new Set([
-        'leftUpperArm', 'leftLowerArm',
-        'rightUpperArm', 'rightLowerArm',
-        'leftUpperLeg', 'leftLowerLeg',
-        'rightUpperLeg', 'rightLowerLeg',
-    ]);
-
+    // Correct retarget: treat Rk as a deviation in the model's facing frame, re-express
+    // it in this bone's PARENT-local frame, then layer it on top of the Mixamo rest:
+    //
+    //   R'     = faceQ · Rk · faceQ⁻¹                     (Rk in model-facing world space)
+    //   target = (parentWorld⁻¹ · R' · parentWorld) · restLocal
+    //
+    // For top-of-chain bones (upper arms, hips) parentWorld ≈ faceQ, so this reduces to
+    // target = Rk · restLocal — i.e. PRE-multiply, the opposite of the broken rest · Rk.
+    // For deeper bones (forearms, hands, fingers) it self-corrects from the live parent
+    // pose. No bone needs a hand-tuned axis flip; the captured rest carries the basis.
     _rigRotation(humanoidKey, rotation = { x: 0, y: 0, z: 0 }, dampener = 1, lerpAmt = 0.3) {
         const boneName = this.boneMap[humanoidKey];
         if (!boneName) return;
         const bone = this.bones[boneName];
         const rest = this.restPose[boneName];
-        if (!bone || !rest) return;
+        if (!bone || !rest || !this._faceQ) return;
 
-        const zSign = this._zFlipBones.has(humanoidKey) ? -1 : 1;
-
-        const euler = new THREE.Euler(
+        // Kalidokit euler (VRM convention) → quaternion
+        const Rk = new THREE.Quaternion().setFromEuler(new THREE.Euler(
             rotation.x * dampener,
             rotation.y * dampener,
-            zSign * rotation.z * dampener,
+            rotation.z * dampener,
             'XYZ'
-        );
-        const offsetQ = new THREE.Quaternion().setFromEuler(euler);
-        const targetQ = rest.clone().multiply(offsetQ);
-        bone.quaternion.slerp(targetQ, lerpAmt);
+        ));
+
+        // Map into the model's facing frame: R' = faceQ · Rk · faceQ⁻¹
+        const Rworld = this._faceQ.clone().multiply(Rk).multiply(this._faceQInv);
+
+        // Re-express in the bone's parent-local frame and apply on top of rest
+        const P = new THREE.Quaternion();
+        bone.parent.getWorldQuaternion(P);
+        const target = P.clone().invert().multiply(Rworld).multiply(P).multiply(rest);
+
+        bone.quaternion.slerp(target, lerpAmt);
     }
 
     // ── Apply rigged data from Kalidokit ──────────────────────────────────────
@@ -315,12 +325,10 @@ class AvatarRenderer {
     }
 
     // ── Smart camera zoom ─────────────────────────────────────────────────────
-    // OrbitControls stores camera position as internal spherical coords (r, theta, phi).
-    // controls.update() recomputes camera.position from those sphericals every frame —
-    // so any position.lerp() we do gets immediately overwritten.
-    // Fix: when mode changes, disable controls entirely, drive camera directly with lerp
-    // + lookAt, then re-enable + update ONCE at the end so controls re-syncs its
-    // internal sphericals from the new position instead of the stale ones.
+    // OrbitControls stores camera as spherical coords and recomputes camera.position
+    // from them on every controls.update() call — overwriting any lerp we do.
+    // Fix: disable controls on mode change, drive camera directly, re-enable + update
+    // once at end so controls re-syncs its internal state from the new position.
     updateCameraMode(faceOnly) {
         if (faceOnly) {
             this._faceOnlyFrames++;
@@ -337,7 +345,6 @@ class AvatarRenderer {
             this._camMode = 'body';
         }
 
-        // Only kick off a lerp when mode actually flips
         if (this._camMode !== prevMode) {
             this.controls.enabled = false;
             this._camLerping = true;
@@ -372,12 +379,11 @@ class AvatarRenderer {
 
             if (this.camera.position.distanceTo(this._camPosTarget) < 2 &&
                 this.controls.target.distanceTo(this._camLookTarget) < 2) {
-                // Snap exact, then re-sync OrbitControls' internal spherical state
                 this.camera.position.copy(this._camPosTarget);
                 this.controls.target.copy(this._camLookTarget);
                 this.camera.lookAt(this.controls.target);
                 this.controls.enabled = true;
-                this.controls.update();
+                this.controls.update(); // re-syncs OrbitControls internal sphericals
                 this._camLerping = false;
             }
         } else {
