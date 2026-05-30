@@ -335,8 +335,11 @@ class AvatarRenderer {
         this._focusDistanceTarget = distance;
     }
 
-    // Called when MediaPipe landmarks arrive
-    updatePose(landmarks) {
+    // Called when MediaPipe landmarks arrive.
+    // worldLandmarks: optional pose_world_landmarks (metric 3D, hip-centred).
+    // When provided, their Z replaces image-space Z for leg bones — giving proper
+    // forward/backward knee depth during walking steps.
+    updatePose(landmarks, worldLandmarks = null) {
         if (this.translationMode !== 'direct') return;
         if (!this.model || !landmarks || landmarks.length < 29) return;
         if (!Object.keys(this.bones).length) return;
@@ -375,16 +378,38 @@ class AvatarRenderer {
         // Torso length = hip-to-shoulder distance in Y (most stable axis).
         const torsoLen = Math.max(Math.abs(hipMidY - shdMidY), 0.05);
 
+        // World torso length for normalising world-space Z to the same scale.
+        // World landmarks are in metres; a typical torso is ~0.45–0.55 m.
+        let worldTorsoLen = 0.5;
+        if (worldLandmarks && worldLandmarks.length >= 25) {
+            const wShY = (worldLandmarks[11].y + worldLandmarks[12].y) / 2;
+            const wHpY = (worldLandmarks[23].y + worldLandmarks[24].y) / 2;
+            worldTorsoLen = Math.max(Math.abs(wHpY - wShY), 0.1);
+        }
+
         // Convert one landmark index to a body-relative 3-D vector.
         // MediaPipe: x→right (0-1), y→down (0-1), z→depth (neg = closer to cam).
         // Output:    x→right, y→up, z→forward (away from camera, scaled).
-        // Set stripZ=true for legs — MediaPipe leg depth is too unreliable.
         const bv = (idx, stripZ = false) => {
             const lmk = j[idx];
             return new THREE.Vector3(
                 (lmk.x - hipMidX) / torsoLen,
                 -(lmk.y - hipMidY) / torsoLen,
                 stripZ ? 0 : (-lmk.z / torsoLen)
+            );
+        };
+
+        // Leg/foot variant: use world Z when available (far more stable for the
+        // forward/backward swing of knees and ankles during a walking step).
+        const bvLeg = (imgIdx, wIdx) => {
+            const lmk = j[imgIdx];
+            const z = (worldLandmarks && wIdx < worldLandmarks.length)
+                ? (-worldLandmarks[wIdx].z / worldTorsoLen)
+                : (-lmk.z / torsoLen);
+            return new THREE.Vector3(
+                (lmk.x - hipMidX) / torsoLen,
+                -(lmk.y - hipMidY) / torsoLen,
+                z
             );
         };
 
@@ -409,19 +434,19 @@ class AvatarRenderer {
         this._applyClavicle(this.boneMap.rightClavicle, lv(12), lv(14), true);
 
         // ── Legs ────────────────────────────────────────────────────────────
-        // _aimBone with useRestDir=true now uses _boneToChildDir — the bone's
-        // actual toward-child direction (from child bone position at rest), so
-        // it works regardless of whether the Mixamo rig's Y+ points toward child
-        // or parent.  For a standing person localDir ≈ restDir → no rotation.
-        this._aimBone(this.boneMap.leftUpLeg,  lv(23), lv(25), 0.45, true);
-        this._aimBone(this.boneMap.leftLeg,    lv(25), lv(27), 0.45, true);
-        this._aimBone(this.boneMap.rightUpLeg, lv(24), lv(26), 0.45, true);
-        this._aimBone(this.boneMap.rightLeg,   lv(26), lv(28), 0.45, true);
+        // bvLeg uses world Z (if available) for the forward/backward depth of
+        // each joint — this makes knees visibly swing forward during a step.
+        const lvLeg = (imgIdx, wIdx) => bvLeg(imgIdx, wIdx).applyQuaternion(rotQ);
+
+        this._aimBone(this.boneMap.leftUpLeg,  lvLeg(23, 23), lvLeg(25, 25), 0.45, true);
+        this._aimBone(this.boneMap.leftLeg,    lvLeg(25, 25), lvLeg(27, 27), 0.45, true);
+        this._aimBone(this.boneMap.rightUpLeg, lvLeg(24, 24), lvLeg(26, 26), 0.45, true);
+        this._aimBone(this.boneMap.rightLeg,   lvLeg(26, 26), lvLeg(28, 28), 0.45, true);
 
         // ── Feet ─────────────────────────────────────────────────────────────
         if (landmarks.length > 32) {
-            this._aimBone(this.boneMap.leftFoot,  lv(29), lv(31), 0.35, true);
-            this._aimBone(this.boneMap.rightFoot, lv(30), lv(32), 0.35, true);
+            this._aimBone(this.boneMap.leftFoot,  lvLeg(29, 29), lvLeg(31, 31), 0.35, true);
+            this._aimBone(this.boneMap.rightFoot, lvLeg(30, 30), lvLeg(32, 32), 0.35, true);
         }
 
         // ── Spine ───────────────────────────────────────────────────────────

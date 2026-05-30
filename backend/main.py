@@ -41,9 +41,10 @@ class SessionState:
         self.recording    = False
         self.running      = False
         self.source       = CAMERA_SOURCE
-        self.last_landmarks = None
-        self.last_face_landmarks = None
-        self.last_hand_landmarks = None
+        self.last_landmarks       = None
+        self.last_world_landmarks = None
+        self.last_face_landmarks  = None
+        self.last_hand_landmarks  = None
         self.frame_count  = 0
 
         self.action_ctrl   = ActionController(ActionConfig())
@@ -107,7 +108,7 @@ async def process_video(file: UploadFile = File(...)):
             ret, frame = cap.read()
             if not ret:
                 break
-            landmarks, _ = ext.process_frame(frame)
+            landmarks, _, _ = ext.process_frame(frame)
             sequence.append({"frame_idx": idx, "landmarks": landmarks})
             idx += 1
 
@@ -164,16 +165,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     break
 
-            landmarks, annotated = state.extractor.process_frame(frame)
+            landmarks, annotated, world_landmarks = state.extractor.process_frame(frame)
             # Facial + hand landmarks — detected in parallel and drawn on the
             # same annotated frame that gets streamed to the live camera preview.
             face_landmarks       = state.extractor.process_face(frame, annotated)
             hand_landmarks       = state.extractor.process_hands(frame, annotated)
             uncertainty_result   = state.scorer.score(landmarks)
 
-            state.last_landmarks      = landmarks
-            state.last_face_landmarks = face_landmarks
-            state.last_hand_landmarks = hand_landmarks
+            state.last_landmarks        = landmarks
+            state.last_world_landmarks  = world_landmarks
+            state.last_face_landmarks   = face_landmarks
+            state.last_hand_landmarks   = hand_landmarks
             state.frame_count        += 1
 
             # ── Action tick ──────────────────────────────────────────────────
@@ -189,7 +191,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 _sync_pose_actions(detected)
                 # Continuous: rotation, X position, walking - only if calibrated
                 if state.pose_detector.is_calibrated():
-                    pose_transform = state.pose_detector.compute_pose_transform(landmarks)
+                    pose_transform = state.pose_detector.compute_pose_transform(landmarks, world_landmarks)
 
             velocity, rotation_delta = state.action_ctrl.update(dt)
             state.action_ctrl.position += velocity * dt
@@ -214,9 +216,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "total":     uncertainty_result["total"],
                     "trusted":   uncertainty_result["trusted"],
                 },
-                "landmarks":      landmarks if landmarks else None,
-                "face_landmarks": face_landmarks if face_landmarks else None,
-                "hand_landmarks": hand_landmarks if hand_landmarks else None,
+                "landmarks":       landmarks       if landmarks       else None,
+                "world_landmarks": world_landmarks if world_landmarks else None,
+                "face_landmarks":  face_landmarks  if face_landmarks  else None,
+                "hand_landmarks":  hand_landmarks  if hand_landmarks  else None,
                 "pose_transform":  pose_transform,
                 "avatar":         state.action_ctrl.get_state_dict(),
                 "detected_actions": [a.value for a in detected],

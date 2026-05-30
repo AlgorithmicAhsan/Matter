@@ -98,7 +98,17 @@ class PoseExtractor:
             if landmarks[i]["visibility"] > 0.3:
                 cv2.circle(annotated, (px, py), 4, (0, 0, 255), -1)
 
-        return landmarks, annotated
+        # World landmarks — metric 3D coords (meters) centered on hip midpoint.
+        # Z is far more reliable here than image-space Z because it comes from the
+        # 3D pose model's skeleton estimate, not 2D foreshortening guesses.
+        world_landmarks = None
+        if results.pose_world_landmarks:
+            world_landmarks = [
+                {"x": lm.x, "y": lm.y, "z": lm.z, "visibility": lm.visibility}
+                for lm in results.pose_world_landmarks.landmark
+            ]
+
+        return landmarks, annotated, world_landmarks
 
     def process_face(self, frame, annotated=None):
         """

@@ -101,12 +101,10 @@ class ActionController {
         if (this.has(ActionType.MOVE_FORWARD))  localZ += fwdSpeed;
         if (this.has(ActionType.MOVE_BACKWARD)) localZ -= bkdSpeed;
 
-        // Strafe
+        // Strafe — always apply; in pose mode driven by walk_direction_x from backend
         let localX = 0;
-        if (!this.poseMode) {
-            if (this.has(ActionType.STRAFE_RIGHT)) localX += cfg.strafeSpeed;
-            if (this.has(ActionType.STRAFE_LEFT))  localX -= cfg.strafeSpeed;
-        }
+        if (this.has(ActionType.STRAFE_RIGHT)) localX += cfg.strafeSpeed;
+        if (this.has(ActionType.STRAFE_LEFT))  localX -= cfg.strafeSpeed;
 
         // Rotation
         let rotDelta = 0;
@@ -148,11 +146,12 @@ class ActionController {
         // Determine locomotion state — crouch triggers even when standing still
         const moving     = localX !== 0 || localZ > 0;
         const movingBack = localZ < 0;
-        if (!this.isGrounded)              this.locomotionState = 'jump';
-        else if (this.isCrouching)         this.locomotionState = 'crouch';  // standing OR moving
-        else if (this.isSprinting && moving) this.locomotionState = 'run';
-        else if (moving || movingBack)     this.locomotionState = 'walk';
-        else                               this.locomotionState = 'idle';
+        const poseStrafe = this.poseMode && (this.has(ActionType.STRAFE_LEFT) || this.has(ActionType.STRAFE_RIGHT));
+        if (!this.isGrounded)                    this.locomotionState = 'jump';
+        else if (this.isCrouching)               this.locomotionState = 'crouch';
+        else if (this.isSprinting && moving)     this.locomotionState = 'run';
+        else if (moving || movingBack || poseStrafe) this.locomotionState = 'walk';
+        else                                     this.locomotionState = 'idle';
 
         // MUST be here — after all integration
         if (this.poseMode && this._poseHipX !== undefined) {
@@ -223,11 +222,12 @@ class ActionController {
         this._poseHipX = transform.hip_x_world;
         this._poseHipY = transform.hip_y_world;
 
-        // Walking: activate/deactivate based on anti-phase detection
+        // Forward/backward walking from anti-phase ankle oscillation
         this._poseWalkSpeed = transform.is_walking ? transform.walk_speed : 0;
 
         if (transform.is_walking) {
-            if (transform.walk_direction === 1) {
+            const dirZ = transform.walk_direction_z ?? transform.walk_direction ?? 1;
+            if (dirZ >= 0) {
                 this.active.add(ActionType.MOVE_FORWARD);
                 this.active.delete(ActionType.MOVE_BACKWARD);
             } else {
@@ -237,6 +237,19 @@ class ActionController {
         } else {
             this.active.delete(ActionType.MOVE_FORWARD);
             this.active.delete(ActionType.MOVE_BACKWARD);
+        }
+
+        // Strafe: lateral hip velocity detected by backend
+        const dirX = transform.walk_direction_x ?? 0;
+        if (dirX > 0) {
+            this.active.add(ActionType.STRAFE_RIGHT);
+            this.active.delete(ActionType.STRAFE_LEFT);
+        } else if (dirX < 0) {
+            this.active.add(ActionType.STRAFE_LEFT);
+            this.active.delete(ActionType.STRAFE_RIGHT);
+        } else {
+            this.active.delete(ActionType.STRAFE_LEFT);
+            this.active.delete(ActionType.STRAFE_RIGHT);
         }
     }
 }

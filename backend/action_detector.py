@@ -43,7 +43,7 @@ class DetectorConfig:
 
     # Calibration
     CALIBRATION_FRAMES         = 45      # ~1.5 s at 30 fps - person must stand still
-    CALIB_STILLNESS_THRESHOLD  = 0.40    # max mean position delta to accept a frame
+    CALIB_STILLNESS_THRESHOLD  = 0.02    # max mean position delta to accept a frame
 
     # Visibility gates
     VIS_MIN                    = 0.50    # per-landmark visibility minimum
@@ -84,6 +84,11 @@ class DetectorConfig:
     LEAN_FORWARD_THRESHOLD     = -0.04
     LEAN_BACKWARD_THRESHOLD    =  0.04
 
+    # -- Strafe (lateral walking) -----------------------------------------------
+    # Hip X velocity (normalized image coords per frame) to trigger strafe.
+    # Paired with a minimum ankle std so pure swaying doesn't count.
+    STRAFE_VELOCITY_THRESHOLD  = 0.005
+
 
 class PoseActionDetector:
     """
@@ -113,10 +118,17 @@ class PoseActionDetector:
         # -- History buffers ---------------------------------------------------
         W = max(self.cfg.VOTE_WINDOW, 30)
         self._hip_y_buf      = collections.deque(maxlen=W)
+        self._hip_x_buf      = collections.deque(maxlen=W)
         self._l_ankle_y_buf  = collections.deque(maxlen=W)
         self._r_ankle_y_buf  = collections.deque(maxlen=W)
+        self._l_ankle_x_buf  = collections.deque(maxlen=W)
+        self._r_ankle_x_buf  = collections.deque(maxlen=W)
         self._l_wrist_y_buf  = collections.deque(maxlen=W)
         self._r_wrist_y_buf  = collections.deque(maxlen=W)
+
+        # Smoothed world-space Z for shoulder landmarks (for rotation + lean).
+        self._smooth_ls_z    = None
+        self._smooth_rs_z    = None
 
         # -- Per-action vote queues (CROUCH + JUMP only) -----------------------
         VW = self.cfg.VOTE_WINDOW
@@ -177,14 +189,16 @@ class PoseActionDetector:
 
         return list(active) if active else [ActionType.IDLE]
 
-    def compute_pose_transform(self, landmarks: Optional[List[Dict]]) -> Optional[dict]:
+    def compute_pose_transform(self, landmarks: Optional[List[Dict]],
+                               world_landmarks: Optional[List[Dict]] = None) -> Optional[dict]:
         """
         Returns continuous transform values for direct avatar control:
-          rotation_delta  – radians to add to avatar Y rotation this frame
-          hip_x_world     – world-space X to set directly (not velocity)
-          is_walking       – True when anti-phase ankle oscillation detected
-          walk_speed       – units/s to move (0 when not walking)
-          walk_direction   – 1 = forward, -1 = backward
+          rotation_delta   – radians to add to avatar Y rotation this frame
+          hip_x_world      – world-space X to set directly (not velocity)
+          is_walking        – True when anti-phase ankle oscillation detected
+          walk_speed        – units/s to move (0 when not walking)
+          walk_direction_z  – 1 = forward, -1 = backward
+          walk_direction_x  – +1 = strafe right, -1 = strafe left, 0 = none
         Returns None if not calibrated or landmarks invalid.
         """
         if not self.calibrated or landmarks is None or len(landmarks) < 33:
@@ -193,14 +207,24 @@ class PoseActionDetector:
             return None
 
         # ── Rotation: frame-to-frame shoulder angle delta ─────────────────────
-        ls = landmarks[L_SHOULDER]
-        rs = landmarks[R_SHOULDER]
+        # Prefer world landmarks for Z — they are metric 3D estimates from the
+        # full 3D pose model, far more stable than image-space Z which is inferred
+        # from 2D foreshortening and is the primary source of rotation jitter.
+        if world_landmarks and len(world_landmarks) >= 33:
+            ls_rot = world_landmarks[L_SHOULDER]
+            rs_rot = world_landmarks[R_SHOULDER]
+            dx = ls_rot['x'] - rs_rot['x']
+            dz = ls_rot['z'] - rs_rot['z']
+        else:
+            # Fallback: smooth image-space Z aggressively before use
+            ls = landmarks[L_SHOULDER]
+            rs = landmarks[R_SHOULDER]
+            Z_ALPHA = 0.05
+            self._smooth_ls_z = ls['z'] if self._smooth_ls_z is None else self._smooth_ls_z + Z_ALPHA * (ls['z'] - self._smooth_ls_z)
+            self._smooth_rs_z = rs['z'] if self._smooth_rs_z is None else self._smooth_rs_z + Z_ALPHA * (rs['z'] - self._smooth_rs_z)
+            dx = ls['x'] - rs['x']
+            dz = self._smooth_ls_z - self._smooth_rs_z
 
-        # atan2 of shoulder vector gives body facing angle.
-        # Tracking the delta (not absolute) eliminates the "which way to return"
-        # ambiguity — the avatar follows the exact rotation path you take.
-        dx = ls['x'] - rs['x']
-        dz = ls['z'] - rs['z']
         current_angle = math.atan2(dz, dx)
 
         if self._prev_shoulder_angle is None:
@@ -249,19 +273,22 @@ class PoseActionDetector:
         # ── Walking: anti-phase ankle oscillation ─────────────────────────────
         is_walking, osc_amp = self._ankles_alternating()
 
-        walk_speed     = 0.0
-        walk_direction = 1   # always forward — nose-hip lean is too unreliable for direction
+        walk_speed      = 0.0
+        walk_direction_z = 1   # forward; backward detection is a future improvement
         if is_walking:
             raw_speed  = osc_amp * self.cfg.WALK_SPEED_SCALE
             walk_speed = float(np.clip(raw_speed, self.cfg.WALK_SPEED_MIN, self.cfg.WALK_SPEED_MAX))
 
+        walk_direction_x = self._detect_strafe()
+
         return {
-            'rotation_delta':  float(rotation_delta),
-            'hip_x_world':     float(hip_x_world),
-            'hip_y_world':     float(hip_y_world),
-            'is_walking':      bool(is_walking),
-            'walk_speed':      float(walk_speed),
-            'walk_direction':  int(walk_direction),
+            'rotation_delta':   float(rotation_delta),
+            'hip_x_world':      float(hip_x_world),
+            'hip_y_world':      float(hip_y_world),
+            'is_walking':       bool(is_walking),
+            'walk_speed':       float(walk_speed),
+            'walk_direction_z': int(walk_direction_z),
+            'walk_direction_x': int(walk_direction_x),
         }
 
     def is_calibrated(self) -> bool:
@@ -332,10 +359,17 @@ class PoseActionDetector:
     # =========================================================================
 
     def _update_buffers(self, lm: List[Dict]):
-        self._hip_y_buf.append((lm[L_HIP]['y'] + lm[R_HIP]['y']) / 2)
+        hip_y = (lm[L_HIP]['y'] + lm[R_HIP]['y']) / 2
+        hip_x = (lm[L_HIP]['x'] + lm[R_HIP]['x']) / 2
+        self._hip_y_buf.append(hip_y)
+        self._hip_x_buf.append(hip_x)
 
-        if self._vis(lm, L_ANKLE): self._l_ankle_y_buf.append(lm[L_ANKLE]['y'])
-        if self._vis(lm, R_ANKLE): self._r_ankle_y_buf.append(lm[R_ANKLE]['y'])
+        if self._vis(lm, L_ANKLE):
+            self._l_ankle_y_buf.append(lm[L_ANKLE]['y'])
+            self._l_ankle_x_buf.append(lm[L_ANKLE]['x'])
+        if self._vis(lm, R_ANKLE):
+            self._r_ankle_y_buf.append(lm[R_ANKLE]['y'])
+            self._r_ankle_x_buf.append(lm[R_ANKLE]['x'])
         if self._vis(lm, L_WRIST): self._l_wrist_y_buf.append(lm[L_WRIST]['y'])
         if self._vis(lm, R_WRIST): self._r_wrist_y_buf.append(lm[R_WRIST]['y'])
 
@@ -413,12 +447,14 @@ class PoseActionDetector:
         Returns (is_walking, oscillation_amplitude).
         Walking = ankles oscillate in anti-phase (left up while right down).
         Standing still = ankles move in sync or barely at all.
+        Uses 16 frames (~0.53s) to reliably cover one full step cycle even at
+        slow cadence, compared to the old 8-frame window.
         """
-        if len(self._l_ankle_y_buf) < 8 or len(self._r_ankle_y_buf) < 8:
+        if len(self._l_ankle_y_buf) < 16 or len(self._r_ankle_y_buf) < 16:
             return False, 0.0
 
-        la = np.array(list(self._l_ankle_y_buf)[-8:])
-        ra = np.array(list(self._r_ankle_y_buf)[-8:])
+        la = np.array(list(self._l_ankle_y_buf)[-16:])
+        ra = np.array(list(self._r_ankle_y_buf)[-16:])
 
         la_std = la.std()
         ra_std = ra.std()
@@ -433,6 +469,35 @@ class PoseActionDetector:
 
         is_walking = corr < self.cfg.WALK_ANTIPHASE_CORR and osc > self.cfg.ANKLE_OSC_THRESHOLD
         return is_walking, osc
+
+    def _detect_strafe(self) -> int:
+        """
+        Returns +1 (strafe avatar-right), -1 (strafe avatar-left), or 0 (no strafe).
+
+        Method: track hip X velocity over the last 8 frames. A sustained lateral
+        shift paired with any ankle movement = sidestep / strafe.
+
+        Image X is mirrored for a front-facing webcam, so:
+          hip_x decreasing → person moving to their right → avatar strafe right (+1)
+          hip_x increasing → person moving to their left  → avatar strafe left  (-1)
+        """
+        if len(self._hip_x_buf) < 8:
+            return 0
+
+        # Require at least one ankle to be moving (rule out pure camera sway)
+        la_std = np.std(list(self._l_ankle_y_buf)[-8:]) if len(self._l_ankle_y_buf) >= 8 else 0.0
+        ra_std = np.std(list(self._r_ankle_y_buf)[-8:]) if len(self._r_ankle_y_buf) >= 8 else 0.0
+        if max(la_std, ra_std) < self.cfg.ANKLE_MIN_STD:
+            return 0
+
+        recent = list(self._hip_x_buf)[-8:]
+        vel = (recent[-1] - recent[0]) / 8   # normalized image X per frame
+
+        if abs(vel) < self.cfg.STRAFE_VELOCITY_THRESHOLD:
+            return 0
+
+        # Negate: image X decreasing = person went right = avatar strafe right (+1)
+        return -1 if vel > 0 else 1
 
     def _oscillation(self, buf_a: collections.deque, buf_b: collections.deque) -> float:
         """Average peak-to-peak amplitude across two signal buffers."""
