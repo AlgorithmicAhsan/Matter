@@ -30,7 +30,7 @@ class ActionConfig {
         this.sprintSpeed     = overrides.sprintSpeed     ?? 180.0;
         this.strafeSpeed     = overrides.strafeSpeed     ?? 60.0;
         this.backwardSpeed   = overrides.backwardSpeed   ?? 55.0;
-        this.turnSpeed       = overrides.turnSpeed       ?? 160.0; // deg/s
+        this.turnSpeed       = overrides.turnSpeed       ?? 80.0;  // deg/s (lowered for gentler gesture turns)
         this.jumpVelocity    = overrides.jumpVelocity    ?? 350.0;
         this.jumpCooldown    = overrides.jumpCooldown    ?? 0.5;   // s
         this.gravity         = overrides.gravity         ?? -800.0;
@@ -75,6 +75,9 @@ class ActionController {
     activate(action)   { this.active.add(action); }
     deactivate(action) { this.active.delete(action); }
     has(action)        { return this.active.has(action); }
+
+    /** Discrete one-shot turn used by the gesture thumbs-up. Positive = turn left. */
+    applyTurnStep(deg) { this.rotation += THREE.MathUtils.degToRad(deg); }
 
     /**
      * Plug in (or clear) a collision environment so physics queries route

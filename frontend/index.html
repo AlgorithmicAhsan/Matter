@@ -848,14 +848,14 @@
                                 <span class="mm-move jump">Jump</span>
                             </li>
                             <li>
-                                <span class="mm-icon">👉</span>
-                                <span class="mm-gesture">Right arm out to side</span>
+                                <span class="mm-icon">👍</span>
+                                <span class="mm-gesture">Right thumbs-up (only thumb)</span>
                                 <span class="mm-arrow">→</span>
                                 <span class="mm-move turn">Turn right</span>
                             </li>
                             <li>
-                                <span class="mm-icon">👈</span>
-                                <span class="mm-gesture">Left arm out to side</span>
+                                <span class="mm-icon">👍</span>
+                                <span class="mm-gesture">Left thumbs-up (only thumb)</span>
                                 <span class="mm-arrow">→</span>
                                 <span class="mm-move turn">Turn left</span>
                             </li>
@@ -991,6 +991,7 @@ class PosiSimApp {
         this.envManager = (typeof EnvironmentManager !== 'undefined')
             ? new EnvironmentManager(null) : null;
         this._courseEnv = null;
+        this._courseFinished = false;
 
         // Speed estimation
         this._lastPos     = new THREE.Vector3();
@@ -1095,10 +1096,13 @@ class PosiSimApp {
         // Build (or rebuild) the course and hand it to the physics controller.
         this._courseEnv = this.envManager.load('obstacle_course');
         this.actionCtrl.setEnvironment(this._courseEnv);
+        this._courseFinished = false;
 
         // Lock a third-person camera behind the avatar so the player can see
-        // what's ahead in the course (gesture tab only).
+        // what's ahead in the course (gesture tab only), and give it the course
+        // walls so it can avoid being occluded by them (e.g. the maze).
         this.avatar.setThirdPersonFollow(true);
+        this.avatar.setCameraColliders(this._courseEnv.colliders);
 
         // Fresh start at the spawn — no stale offsets from a prior Live session.
         this._resetForCourse();
@@ -1111,9 +1115,32 @@ class PosiSimApp {
         this._courseEnv = null;
         if (this.avatar) {
             this.avatar.setThirdPersonFollow(false);  // restore orbit camera
+            this.avatar.setCameraColliders(null);
             this.avatar.setDefaultEnvVisible(true);
         }
         this._resetForCourse();
+    }
+
+    // Reached the finish line: celebrate briefly and snap back to the start.
+    _onCourseFinish() {
+        if (this._courseFinished) return;
+        this._courseFinished = true;
+        this._resetForCourse();   // back to spawn
+
+        const overlay = document.getElementById('countdown-overlay');
+        const numEl   = document.getElementById('countdown-number');
+        const labelEl = document.getElementById('countdown-label');
+        if (overlay && numEl && labelEl) {
+            numEl.textContent   = '🏁';
+            labelEl.textContent = 'Course Complete! Back to start.';
+            overlay.classList.add('show');
+            setTimeout(() => {
+                overlay.classList.remove('show');
+                this._courseFinished = false;
+            }, 2500);
+        } else {
+            this._courseFinished = false;
+        }
     }
 
     // Reset locomotion + clear any stale pose state so gesture/keyboard movement
@@ -1268,7 +1295,11 @@ class PosiSimApp {
             this.actionCtrl.poseMode = data.pose_mode ?? false;
 
             if (this.poseActionMapper) {
-                this.poseActionMapper.update(data.landmarks ?? null, data.pose_mode ?? false);
+                this.poseActionMapper.update(
+                    data.landmarks ?? null,
+                    data.hand_landmarks ?? null,
+                    data.pose_mode ?? false
+                );
             }
 
             // Keep head + fingers lively (these only touch head/finger bones, so
@@ -1700,6 +1731,14 @@ class PosiSimApp {
 
             const { position, rotationRad, locomotionState } = this.actionCtrl.update(dt);
             if (this.avatar) this.avatar.setWorldTransform(position, rotationRad, locomotionState);
+
+            // Gesture tab: detect reaching the finish line (must be up on the
+            // elevated platform, not skirting the ground beside it) → celebrate + reset.
+            if (this.appMode === 'gesture' && this._courseEnv &&
+                typeof this._courseEnv.isFinish === 'function' &&
+                this._courseEnv.isFinish(position.x, position.z) && position.y > 100) {
+                this._onCourseFinish();
+            }
 
             if (this.keyboardCtrl) this.keyHUD.update(this.keyboardCtrl.getHeldKeys());
 

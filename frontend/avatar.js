@@ -143,8 +143,10 @@ class AvatarRenderer {
         // When on, the camera locks behind the avatar (looking the way it walks)
         // so the user can see what's ahead in the obstacle course. Off elsewhere.
         this._thirdPersonFollow = false;
-        this._tpDistance = 300;
-        this._tpHeight   = 165;
+        this._tpDistance = 290;
+        this._tpHeight   = 175;
+        this._camColliders = null;  // Box3[] for camera-wall collision (maze)
+        this._camRay       = null;  // reused THREE.Ray
 
         // ── Crouch foot-planting ────────────────────────────────────────────
         // A bent-knee squat alone lifts the feet off the floor (hovering) — and
@@ -245,26 +247,63 @@ class AvatarRenderer {
         if (this.controls) this.controls.enabled = !enabled;
     }
 
+    /**
+     * Give the third-person camera a set of AABB colliders (the obstacle-course
+     * walls) so it can avoid being occluded by them. Pass null to clear.
+     */
+    setCameraColliders(colliders) {
+        if (!colliders) { this._camColliders = null; return; }
+        this._camColliders = colliders.map(c => new THREE.Box3(
+            new THREE.Vector3(c.cx - c.hw, c.cy - c.hh, c.cz - c.hd),
+            new THREE.Vector3(c.cx + c.hw, c.cy + c.hh, c.cz + c.hd)
+        ));
+    }
+
     // Place the camera behind + above the avatar, looking the way it travels.
+    // If a wall sits between the look target and that spot (e.g. a maze wall when
+    // turning), pull the camera in front of the wall so the avatar stays visible.
     _updateThirdPersonCamera() {
         const r   = this.worldRotation;
         const pos = this.worldPosition;
         const fx  = Math.sin(r), fz = Math.cos(r);  // travel/forward direction
 
+        // Look target: a little ahead of + above the avatar.
+        const tgt = this._scratch.v1.set(pos.x + fx * 60, pos.y + 95, pos.z + fz * 60);
+        this.controls.target.lerp(tgt, 0.2);
+
+        // Desired camera spot: behind + above.
         const desired = this._scratch.v0.set(
             pos.x - fx * this._tpDistance,
             pos.y + this._tpHeight,
             pos.z - fz * this._tpDistance
         );
-        this.camera.position.lerp(desired, 0.12);
 
-        // Aim slightly ahead of + above the avatar so the path forward is visible.
-        const tgt = this._scratch.v1.set(
-            pos.x + fx * 60,
-            pos.y + 95,
-            pos.z + fz * 60
-        );
-        this.controls.target.lerp(tgt, 0.2);
+        // Camera-wall collision (maze): cast from the look target to the desired
+        // spot; if a wall is hit, place the camera just in front of it.
+        let camTarget = desired;
+        const from = this.controls.target;
+        const dir  = this._scratch.v2.subVectors(desired, from);
+        const maxDist = dir.length();
+        if (this._camColliders && maxDist > 1e-3) {
+            dir.multiplyScalar(1 / maxDist);
+            if (!this._camRay) this._camRay = new THREE.Ray();
+            this._camRay.origin.copy(from);
+            this._camRay.direction.copy(dir);
+            let closest = maxDist;
+            const hit = this._scratch.v3;
+            for (const box of this._camColliders) {
+                if (this._camRay.intersectBox(box, hit)) {
+                    const dHit = hit.distanceTo(from);
+                    if (dHit < closest) closest = dHit;
+                }
+            }
+            if (closest < maxDist) {
+                const safe = Math.max(60, closest - 25);
+                camTarget = this._scratch.v0.copy(from).addScaledVector(dir, safe);
+            }
+        }
+
+        this.camera.position.lerp(camTarget, 0.18);
         this.camera.lookAt(this.controls.target);
     }
 

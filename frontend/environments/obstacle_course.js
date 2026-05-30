@@ -35,6 +35,7 @@ class ObstacleCourseEnvironment {
         this.gaps        = [];   // {minZ,maxZ}
         this.lowBarriers = [];   // {minZ,maxZ,clearanceY}
         this.ramps       = [];   // {minZ,maxZ,rampHeight,minX,maxX,flat?}
+        this.finishZ     = 1545; // crossing this Z on the platform = course complete
 
         // ── Procedural textures (built once, reused) ────────────────────────
         this._tex = {
@@ -55,7 +56,7 @@ class ObstacleCourseEnvironment {
     _build() {
         this._addFloor();
         this._addCrouchBarrier();
-        this._addStaggerWalls();
+        this._addMaze();
         this._addGap();
         this._addRamp();
         this._addLabels();
@@ -103,7 +104,7 @@ class ObstacleCourseEnvironment {
         const centreZ   = 200;
         const depth     = 60;     // Z thickness
         const gateW     = 200;    // width of the passage
-        const beamH     = 85;     // height of bottom of top beam (player must duck under)
+        const beamH     = 126;    // height of bottom of top beam (player must duck under) — raised by the beam thickness
         const beamThick = 18;
         const postH     = beamH + beamThick;
         const totalW    = 600;    // full wall width inc. solid side walls
@@ -170,50 +171,45 @@ class ObstacleCourseEnvironment {
         );
     }
 
-    // ── OBSTACLE 2: Stagger Walls ─────────────────────────────────────────────
-    /** Two offset walls forcing the player to zigzag — requires turning/navigating */
-    _addStaggerWalls() {
-        const wallH = 200;
+    // ── OBSTACLE 2: Navigation maze ───────────────────────────────────────────
+    /** Two staggered full-lane walls, each with a side gap, forcing the player to
+     *  veer RIGHT then LEFT to weave through. Tall enough that you can't jump them
+     *  — you must turn + walk. This is what exercises the turn gestures. */
+    _addMaze() {
+        const wallH = 220;   // unjumpable — must navigate around
         const wallD = 50;
-        const wallW = 200;
 
         const wallMat = new THREE.MeshLambertMaterial({
-            map: this._tiled(this._tex.panel, 2, 2),
+            map: this._tiled(this._tex.panel, 3, 2),
             color: 0x88bbff,
             emissive: new THREE.Color(0x1166cc),
             emissiveIntensity: 0.35,
         });
         this._trackMat(wallMat);
 
-        // Left wall — blocks left side at Z=420, player must pass RIGHT
-        this._box(
-            { x: -200, y: wallH / 2, z: 420 },
-            { w: wallW, h: wallH, d: wallD }, wallMat, false
-        );
-        // Right wall — blocks right side at Z=560, player must pass LEFT
-        this._box(
-            { x:  200, y: wallH / 2, z: 560 },
-            { w: wallW, h: wallH, d: wallD }, wallMat, false
-        );
+        // Wall 1 @ Z=440 — spans from the LEFT boundary to x=+130, leaving a gap
+        // on the RIGHT (x: 130 → 400). Player must veer RIGHT to pass.
+        const w1cx = -135, w1w = 530;
+        this._box({ x: w1cx, y: wallH / 2, z: 440 }, { w: w1w, h: wallH, d: wallD }, wallMat, false);
+        this.colliders.push({ cx: w1cx, cy: wallH / 2, cz: 440, hw: w1w / 2, hh: wallH / 2, hd: wallD / 2 });
+        this._emissiveBox({ x: 130, y: wallH / 2, z: 440 }, { w: 6, h: wallH, d: wallD + 4 }, 0x39a0ff, 0.9, false);
 
-        // Neon edge trim on the inner edges of each wall (guides the eye)
-        this._emissiveBox({ x: -100, y: wallH / 2, z: 420 }, { w: 6, h: wallH, d: wallD + 4 }, 0x39a0ff, 0.9, false);
-        this._emissiveBox({ x:  100, y: wallH / 2, z: 560 }, { w: 6, h: wallH, d: wallD + 4 }, 0x39a0ff, 0.9, false);
+        // Wall 2 @ Z=620 — spans from the RIGHT boundary to x=-130, leaving a gap
+        // on the LEFT (x: -400 → -130). Player must veer LEFT to pass.
+        const w2cx = 135, w2w = 530;
+        this._box({ x: w2cx, y: wallH / 2, z: 620 }, { w: w2w, h: wallH, d: wallD }, wallMat, false);
+        this.colliders.push({ cx: w2cx, cy: wallH / 2, cz: 620, hw: w2w / 2, hh: wallH / 2, hd: wallD / 2 });
+        this._emissiveBox({ x: -130, y: wallH / 2, z: 620 }, { w: 6, h: wallH, d: wallD + 4 }, 0x39a0ff, 0.9, false);
 
-        // Physics: visible stagger walls (these WERE only visual in the original;
-        // keep them visual-only to preserve identical collision behaviour).
-        // Boundary walls (invisible, keep player in lane)
+        // Lane boundary walls (invisible — keep the player inside the lane).
         this.colliders.push(
             { cx: -410, cy: 200, cz: 800, hw: 10, hh: 400, hd: 1600 },
             { cx:  410, cy: 200, cz: 800, hw: 10, hh: 400, hd: 1600 }
         );
 
-        // Re-add the stagger walls as REAL colliders so turning actually matters.
-        // (Matches their visual footprint exactly.)
-        this.colliders.push(
-            { cx: -200, cy: wallH/2, cz: 420, hw: wallW/2, hh: wallH/2, hd: wallD/2 },
-            { cx:  200, cy: wallH/2, cz: 560, hw: wallW/2, hh: wallH/2, hd: wallD/2 }
-        );
+        // Floor arrows hinting the weave (decoration).
+        this._emissiveBox({ x:  260, y: 2, z: 360 }, { w: 130, h: 3, d: 8 }, 0x39a0ff, 0.6, false);
+        this._emissiveBox({ x: -260, y: 2, z: 540 }, { w: 130, h: 3, d: 8 }, 0x39a0ff, 0.6, false);
     }
 
     // ── OBSTACLE 3: Gap ───────────────────────────────────────────────────────
@@ -334,8 +330,8 @@ class ObstacleCourseEnvironment {
     // ── Labels ────────────────────────────────────────────────────────────────
     _addLabels() {
         const labels = [
-            { text: '↓ CROUCH',   z: 160,  y: 140, color: '#ff7040' },
-            { text: '↔ NAVIGATE', z: 480,  y: 300, color: '#4488ff' },
+            { text: '↓ CROUCH',  z: 160,  y: 175, color: '#ff7040' },
+            { text: '↔ WEAVE',    z: 530,  y: 320, color: '#4488ff' },
             { text: '↑ JUMP',     z: 760,  y: 100, color: '#00d4ff' },
             { text: '↗ WALK UP',  z: 1050, y: 230, color: '#00ff88' },
             { text: '★ FINISH',   z: 1560, y: 270, color: '#ffdd00' },
@@ -383,6 +379,11 @@ class ObstacleCourseEnvironment {
     /** True if the avatar is over a gap (should fall). */
     isOverGap(x, z) {
         return this.gaps.some(g => z >= g.minZ && z <= g.maxZ);
+    }
+
+    /** True once the avatar has crossed the finish line on the elevated platform. */
+    isFinish(x, z) {
+        return z >= this.finishZ;
     }
 
     /**
