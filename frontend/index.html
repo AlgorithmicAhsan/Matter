@@ -1055,6 +1055,9 @@ class PosiSimApp {
             // detected, independent of the locomotion pose_mode toggle.
             if (this.avatar) this.avatar.updateFace(data.face_landmarks ?? null);
 
+            // Finger curl from hand landmarks — runs whenever a hand is detected.
+            if (this.avatar) this.avatar.updateHands(data.hand_landmarks ?? null);
+
             // Adaptive camera: frame only the body region visible in the feed.
             if (this.avatar) this.avatar.setAutoFrame(data.landmarks ?? null, data.face_landmarks ?? null);
 

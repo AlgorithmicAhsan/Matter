@@ -40,6 +40,18 @@ class PoseExtractor:
         # used to draw the face the same way POSE_CONNECTIONS draws the body.
         self.FACE_CONNECTIONS = self.mp_face.FACEMESH_CONTOURS
 
+        # Hands — detected in parallel to the body pose (see process_hands).
+        # Gives 21 articulated landmarks per hand (full fingers), unlike the
+        # ~3 coarse hand points the body Pose model provides.
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            max_num_hands=2,
+            model_complexity=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        self.HAND_CONNECTIONS = self.mp_hands.HAND_CONNECTIONS
+
     def process_frame(self, frame):
         """
         Main method — call this once per frame.
@@ -118,6 +130,50 @@ class PoseExtractor:
                              (255, 180, 0), 1)
 
         return face_landmarks
+
+    def process_hands(self, frame, annotated=None):
+        """
+        Detect hand landmarks (MediaPipe Hands) in parallel to the body pose.
+        Mirrors process_frame / process_face: returns the landmarks and, when an
+        `annotated` frame is supplied, draws each hand skeleton onto it.
+
+        Returns {"left": [...21], "right": [...21]} (each a list of {x, y, z}),
+        with a side set to None when that hand isn't visible — or None if no
+        hand is detected at all. Hand landmarks have no per-point visibility.
+
+        NOTE: MediaPipe's Left/Right labels assume a mirrored (selfie) image.
+        The raw OpenCV frame is NOT mirrored, so these labels may be swapped
+        relative to the user's real hands — we'll account for that when mapping.
+        """
+        h, w = frame.shape[:2]
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        results = self.hands.process(rgb)
+
+        if not results.multi_hand_landmarks:
+            return None
+
+        out = {"left": None, "right": None}
+        for lm_list, handedness in zip(results.multi_hand_landmarks,
+                                       results.multi_handedness):
+            label = handedness.classification[0].label.lower()  # 'left' / 'right'
+            pts   = [{"x": lm.x, "y": lm.y, "z": lm.z} for lm in lm_list.landmark]
+            out[label] = pts
+
+            # Draw the hand skeleton — same manual style as the body skeleton.
+            if annotated is not None:
+                px = [(int(p["x"] * w), int(p["y"] * h)) for p in pts]
+                for start_idx, end_idx in self.HAND_CONNECTIONS:
+                    if start_idx < len(px) and end_idx < len(px):
+                        cv2.line(annotated, px[start_idx], px[end_idx],
+                                 (0, 200, 255), 2)
+                for (x, y) in px:
+                    cv2.circle(annotated, (x, y), 3, (255, 0, 200), -1)
+
+        if out["left"] is None and out["right"] is None:
+            return None
+        return out
 
 
 if __name__ == "__main__":

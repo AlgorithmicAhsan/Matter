@@ -92,6 +92,25 @@ class AvatarRenderer {
         this._focusDistance       = 320;  // current orbit distance
         this._focusDistanceTarget = 320;
 
+        // ── Finger mapping (hand landmarks → finger bone curl) ───────────────
+        // Each finger: the 4 MediaPipe landmark indices + the 3 drivable Mixamo
+        // bone suffixes (tip bone Finger4 isn't rotated).
+        this._FINGERS = [
+            { lms: [1,  2,  3,  4],  bones: ['Thumb1',  'Thumb2',  'Thumb3'  ] },
+            { lms: [5,  6,  7,  8],  bones: ['Index1',  'Index2',  'Index3'  ] },
+            { lms: [9,  10, 11, 12], bones: ['Middle1', 'Middle2', 'Middle3' ] },
+            { lms: [13, 14, 15, 16], bones: ['Ring1',   'Ring2',   'Ring3'   ] },
+            { lms: [17, 18, 19, 20], bones: ['Pinky1',  'Pinky2',  'Pinky3'  ] },
+        ];
+        this._fingerCurl     = {};   // per-bone EMA-smoothed curl angle
+        this._fingerBendAxis = new THREE.Vector3(0, 0, 1); // 4-finger local flex axis
+        this._fingerBendSign = { left: 1, right: 1 };      // flip per hand if curling backwards
+        // Thumb sits in a different plane → its own local flex axis + sign.
+        this._thumbBendAxis  = new THREE.Vector3(0, 1, 0);
+        this._thumbBendSign  = { left: 1, right: 1 };
+        this._fingerGain     = 1.25; // amplify curl slightly
+        this._handSwap       = false; // swap detected↔avatar hands if mirrored
+
         // Leg swing sign — +1 or -1, auto-detected after model loads
         // (some Mixamo exports have inverted local X for leg bones)
         this._legSign = 1;
@@ -463,6 +482,77 @@ class AvatarRenderer {
         ));
         this._scratch.q0.copy(rest).multiply(offset);
         headBone.quaternion.slerp(this._scratch.q0, this._headAlpha);
+    }
+
+    // Called with MediaPipe hand landmarks: { left:[...21]|null, right:[...21]|null }.
+    // Drives finger curl on both hands. Independent of body pose.
+    updateHands(handData) {
+        if (!this.model || !Object.keys(this.bones).length) return;
+        this._applyHand('left',  handData && handData.left);
+        this._applyHand('right', handData && handData.right);
+    }
+
+    // Map one detected hand onto an avatar hand and curl its fingers.
+    _applyHand(detectedSide, lms) {
+        // Detected MediaPipe side → avatar side (optional mirror swap).
+        const swap = this._handSwap;
+        const avatarSide = (detectedSide === 'left')
+            ? (swap ? 'Right' : 'Left')
+            : (swap ? 'Left'  : 'Right');
+
+        if (!lms || lms.length < 21) { this._relaxHand(avatarSide); return; }
+
+        const side = avatarSide.toLowerCase();
+        const V = (i) => new THREE.Vector3(lms[i].x, lms[i].y, lms[i].z);
+        const wrist = V(0);
+
+        for (const f of this._FINGERS) {
+            // Thumb uses its own flex axis/sign — different plane from the fingers.
+            const isThumb = f.bones[0].startsWith('Thumb');
+            const axis = isThumb ? this._thumbBendAxis : this._fingerBendAxis;
+            const sign = isThumb ? (this._thumbBendSign[side]  ?? 1)
+                                 : (this._fingerBendSign[side] ?? 1);
+
+            // 5 points (wrist + 4 joints) → 4 segments → 3 joint bend angles.
+            const P = [wrist, V(f.lms[0]), V(f.lms[1]), V(f.lms[2]), V(f.lms[3])];
+            const seg = [];
+            for (let i = 0; i < 4; i++) {
+                seg.push(P[i + 1].clone().sub(P[i]).normalize());
+            }
+            for (let i = 0; i < 3; i++) {
+                // Bend angle is rotation-invariant: works at any hand orientation.
+                const d = THREE.MathUtils.clamp(seg[i].dot(seg[i + 1]), -1, 1);
+                const angle = Math.acos(d);  // ≥ 0, grows as the joint curls
+                this._applyCurl('mixamorig' + avatarSide + 'Hand' + f.bones[i], angle, sign, axis);
+            }
+        }
+    }
+
+    // Apply a single finger-joint curl on top of its rest pose (EMA-smoothed).
+    _applyCurl(boneName, angle, sign, axis) {
+        const bone = this.bones[boneName];
+        const rest = this.restPose[boneName];
+        if (!bone || !rest) return;
+
+        const prev = this._fingerCurl[boneName] ?? 0;
+        const sm   = prev + 0.5 * (angle * this._fingerGain - prev);
+        this._fingerCurl[boneName] = sm;
+
+        const q = this._scratch.q1.setFromAxisAngle(axis, sm * sign);
+        this._scratch.q0.copy(rest).multiply(q);
+        bone.quaternion.slerp(this._scratch.q0, 0.5);
+    }
+
+    // Ease a hand's fingers back to rest when it isn't detected.
+    _relaxHand(avatarSide) {
+        for (const f of this._FINGERS) {
+            for (const b of f.bones) {
+                const name = 'mixamorig' + avatarSide + 'Hand' + b;
+                const bone = this.bones[name], rest = this.restPose[name];
+                if (bone && rest) bone.quaternion.slerp(rest, 0.2);
+                this._fingerCurl[name] = 0;
+            }
+        }
     }
 
     // Lift the clavicle bone proportionally when the arm is raised above horizontal.

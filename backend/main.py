@@ -43,6 +43,7 @@ class SessionState:
         self.source       = CAMERA_SOURCE
         self.last_landmarks = None
         self.last_face_landmarks = None
+        self.last_hand_landmarks = None
         self.frame_count  = 0
 
         self.action_ctrl   = ActionController(ActionConfig())
@@ -164,13 +165,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
 
             landmarks, annotated = state.extractor.process_frame(frame)
-            # Facial landmarks — detected in parallel and drawn on the same
-            # annotated frame that gets streamed to the live camera preview.
+            # Facial + hand landmarks — detected in parallel and drawn on the
+            # same annotated frame that gets streamed to the live camera preview.
             face_landmarks       = state.extractor.process_face(frame, annotated)
+            hand_landmarks       = state.extractor.process_hands(frame, annotated)
             uncertainty_result   = state.scorer.score(landmarks)
 
             state.last_landmarks      = landmarks
             state.last_face_landmarks = face_landmarks
+            state.last_hand_landmarks = hand_landmarks
             state.frame_count        += 1
 
             # ── Action tick ──────────────────────────────────────────────────
@@ -213,6 +216,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 },
                 "landmarks":      landmarks if landmarks else None,
                 "face_landmarks": face_landmarks if face_landmarks else None,
+                "hand_landmarks": hand_landmarks if hand_landmarks else None,
                 "pose_transform":  pose_transform,
                 "avatar":         state.action_ctrl.get_state_dict(),
                 "detected_actions": [a.value for a in detected],
