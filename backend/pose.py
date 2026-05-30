@@ -28,6 +28,18 @@ class PoseExtractor:
             min_tracking_confidence=0.5
         )
 
+        # Face Mesh — detected in parallel to the body pose (see process_face).
+        self.mp_face = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,    # adds iris points → 478 landmarks
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        # Light contour connections (eyes, brows, lips, face oval, irises) —
+        # used to draw the face the same way POSE_CONNECTIONS draws the body.
+        self.FACE_CONNECTIONS = self.mp_face.FACEMESH_CONTOURS
+
     def process_frame(self, frame):
         """
         Main method — call this once per frame.
@@ -75,6 +87,37 @@ class PoseExtractor:
                 cv2.circle(annotated, (px, py), 4, (0, 0, 255), -1)
 
         return landmarks, annotated
+
+    def process_face(self, frame, annotated=None):
+        """
+        Detect facial landmarks (MediaPipe Face Mesh) in parallel to the body
+        pose. Mirrors process_frame: returns the landmark list and, when an
+        `annotated` frame is supplied, draws the face contours onto it.
+
+        Returns a list of 478 dicts {x, y, z} or None. Face Mesh landmarks have
+        no per-point visibility, unlike pose landmarks.
+        """
+        h, w = frame.shape[:2]
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        results = self.face_mesh.process(rgb)
+
+        if not results.multi_face_landmarks:
+            return None
+
+        face = results.multi_face_landmarks[0]
+        face_landmarks = [{"x": lm.x, "y": lm.y, "z": lm.z} for lm in face.landmark]
+
+        # Draw face contours manually — same style as the pose skeleton above.
+        if annotated is not None:
+            points = [(int(lm["x"] * w), int(lm["y"] * h)) for lm in face_landmarks]
+            for start_idx, end_idx in self.FACE_CONNECTIONS:
+                if start_idx < len(points) and end_idx < len(points):
+                    cv2.line(annotated, points[start_idx], points[end_idx],
+                             (255, 180, 0), 1)
+
+        return face_landmarks
 
 
 if __name__ == "__main__":

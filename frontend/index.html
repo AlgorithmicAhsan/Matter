@@ -1051,6 +1051,10 @@ class PosiSimApp {
             if (this.avatar && data.landmarks && data.pose_mode) {
                 this.avatar.updatePose(data.landmarks);
             }
+            // Head nod/turn/tilt from face landmarks — runs whenever a face is
+            // detected, independent of the locomotion pose_mode toggle.
+            if (this.avatar) this.avatar.updateFace(data.face_landmarks ?? null);
+
             this.actionCtrl.poseMode = data.pose_mode ?? false;
 
             if (data.pose_mode && data.pose_transform) {

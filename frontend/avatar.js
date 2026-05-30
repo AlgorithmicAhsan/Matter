@@ -67,7 +67,19 @@ class AvatarRenderer {
             // Clavicles — lift when arm is raised
             leftClavicle:  'mixamorigLeftShoulder',
             rightClavicle: 'mixamorigRightShoulder',
+            // Head — driven by face landmarks (nod / turn / tilt)
+            neck:          'mixamorigNeck',
+            head:          'mixamorigHead',
         };
+
+        // ── Head tracking (face nod/turn/tilt → Head bone) ──────────────────
+        // Smoothed Euler angles applied on top of the head's rest pose.
+        // Signs flip direction (mirror feel); gains scale; clamps cap range.
+        this._headAngles = { pitch: 0, yaw: 0, roll: 0 };
+        this._headSign   = { pitch: 1, yaw: -1, roll: -1 };
+        this._headGain   = { pitch: 1.0, yaw: 1.0, roll: 1.0 };
+        this._headClamp  = { pitch: 0.6, yaw: 0.7, roll: 0.5 }; // radians
+        this._headAlpha  = 0.4;  // bone slerp responsiveness
 
         // Leg swing sign — +1 or -1, auto-detected after model loads
         // (some Mixamo exports have inverted local X for leg bones)
@@ -357,6 +369,53 @@ class AvatarRenderer {
         const spineShdVec = this._scratch.v3.set(spineShdX, spineShdY, 0);
         this._aimBone(this.boneMap.spine, spineHipVec, spineShdVec, 0.20);
 
+    }
+
+    // Called with MediaPipe Face Mesh landmarks — drives the head bone's
+    // nod (pitch) / turn (yaw) / tilt (roll). Independent of body pose.
+    updateFace(faceLandmarks) {
+        const headBone = this.bones[this.boneMap.head];
+        const rest     = headBone && this.restPose[this.boneMap.head];
+        if (!headBone || !rest) return;
+
+        // No face detected this frame → ease the head back to its rest pose.
+        if (!faceLandmarks || faceLandmarks.length < 468) {
+            headBone.quaternion.slerp(rest, 0.1);
+            return;
+        }
+
+        const L = faceLandmarks;
+        // View-space vectors: x→right, y→up, z→toward camera.
+        const V = (i) => new THREE.Vector3(L[i].x, -L[i].y, -L[i].z);
+
+        // Build an orthonormal head basis from stable facial reference points.
+        //   right: right cheek → left cheek   up: chin → forehead
+        const right = V(454).sub(V(234)).normalize();
+        let   up    = V(10).sub(V(152)).normalize();
+        const fwd   = new THREE.Vector3().crossVectors(right, up).normalize();
+        up.crossVectors(fwd, right).normalize();
+
+        // Orientation matrix → Euler. A face looking straight at the camera
+        // yields ~identity, so the angles self-zero at neutral (no calibration).
+        const m = new THREE.Matrix4().makeBasis(right, up, fwd);
+        const e = new THREE.Euler().setFromRotationMatrix(m, 'XYZ');
+
+        const sgn = this._headSign, gain = this._headGain, clmp = this._headClamp;
+        const tgtPitch = THREE.MathUtils.clamp(e.x * gain.pitch * sgn.pitch, -clmp.pitch, clmp.pitch);
+        const tgtYaw   = THREE.MathUtils.clamp(e.y * gain.yaw   * sgn.yaw,   -clmp.yaw,   clmp.yaw);
+        const tgtRoll  = THREE.MathUtils.clamp(e.z * gain.roll  * sgn.roll,  -clmp.roll,  clmp.roll);
+
+        // EMA-smooth the angles to kill landmark jitter.
+        const a = this._bypassEMA ? 1 : 0.5;
+        this._headAngles.pitch += a * (tgtPitch - this._headAngles.pitch);
+        this._headAngles.yaw   += a * (tgtYaw   - this._headAngles.yaw);
+        this._headAngles.roll  += a * (tgtRoll  - this._headAngles.roll);
+
+        const offset = this._scratch.q1.setFromEuler(new THREE.Euler(
+            this._headAngles.pitch, this._headAngles.yaw, this._headAngles.roll, 'XYZ'
+        ));
+        this._scratch.q0.copy(rest).multiply(offset);
+        headBone.quaternion.slerp(this._scratch.q0, this._headAlpha);
     }
 
     // Lift the clavicle bone proportionally when the arm is raised above horizontal.
