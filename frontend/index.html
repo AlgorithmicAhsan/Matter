@@ -1055,6 +1055,9 @@ class PosiSimApp {
             // detected, independent of the locomotion pose_mode toggle.
             if (this.avatar) this.avatar.updateFace(data.face_landmarks ?? null);
 
+            // Adaptive camera: frame only the body region visible in the feed.
+            if (this.avatar) this.avatar.setAutoFrame(data.landmarks ?? null, data.face_landmarks ?? null);
+
             this.actionCtrl.poseMode = data.pose_mode ?? false;
 
             if (data.pose_mode && data.pose_transform) {

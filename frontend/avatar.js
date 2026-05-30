@@ -81,6 +81,17 @@ class AvatarRenderer {
         this._headClamp  = { pitch: 0.6, yaw: 0.7, roll: 0.5 }; // radians
         this._headAlpha  = 0.4;  // bone slerp responsiveness
 
+        // ── Adaptive camera framing ─────────────────────────────────────────
+        // Zoom/pan the camera to fit only the body region currently visible in
+        // the live feed (face-only → head close-up, full body → wide shot).
+        // Only the orbit DISTANCE + target are managed; the user's orbit angle
+        // is preserved. Heights are in avatar units (model ≈ 150 tall, feet=0).
+        this._autoFrame           = true;
+        this._focusOffset         = 80;   // current target height above feet
+        this._focusOffsetTarget   = 80;
+        this._focusDistance       = 320;  // current orbit distance
+        this._focusDistanceTarget = 320;
+
         // Leg swing sign — +1 or -1, auto-detected after model loads
         // (some Mixamo exports have inverted local X for leg bones)
         this._legSign = 1;
@@ -264,9 +275,45 @@ class AvatarRenderer {
             this.model.rotation.y = Math.PI + rotationRad;
         }
 
-        this.controls.target.lerp(
-            new THREE.Vector3(position.x, position.y + 80, position.z), 0.1
+        // ── Adaptive framing ────────────────────────────────────────────────
+        // Smooth the focus params toward their targets (set by setAutoFrame).
+        this._focusOffset   += (this._focusOffsetTarget   - this._focusOffset)   * 0.08;
+        this._focusDistance += (this._focusDistanceTarget - this._focusDistance) * 0.08;
+
+        const desiredTarget = this._scratch.v2.set(
+            position.x, position.y + this._focusOffset, position.z
         );
+        this.controls.target.lerp(desiredTarget, 0.1);
+
+        if (this._autoFrame) {
+            // Keep the user's current orbit direction; only override the distance.
+            const dir = this._scratch.v0.subVectors(this.camera.position, this.controls.target);
+            const len = dir.length();
+            if (len > 1e-3) {
+                dir.multiplyScalar(this._focusDistance / len);
+                const desiredPos = this._scratch.v1.copy(this.controls.target).add(dir);
+                this.camera.position.lerp(desiredPos, 0.08);
+            }
+        }
+    }
+
+    // Pick a camera framing from the body region visible in the live feed.
+    // landmarks = MediaPipe pose (33, with visibility); faceLandmarks = face mesh.
+    setAutoFrame(landmarks, faceLandmarks) {
+        if (!this._autoFrame) return;
+
+        const vis     = (i) => landmarks && landmarks[i] && landmarks[i].visibility > 0.5;
+        const hasFace = !!faceLandmarks || vis(0);
+
+        let offset, distance;
+        if (vis(25) || vis(26) || vis(27) || vis(28)) { offset = 80;  distance = 320; } // legs  → full body
+        else if (vis(23) || vis(24))                  { offset = 100; distance = 235; } // hips  → upper body
+        else if (vis(11) || vis(12))                  { offset = 125; distance = 150; } // shldr → head + shoulders
+        else if (hasFace)                             { offset = 145; distance = 95;  } // face  → close-up
+        else return;  // nothing detected — hold the last framing
+
+        this._focusOffsetTarget   = offset;
+        this._focusDistanceTarget = distance;
     }
 
     // Called when MediaPipe landmarks arrive
