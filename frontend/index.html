@@ -391,6 +391,55 @@
             margin-left: 6px;
         }
 
+        /* ── Gesture: Moves Mapping menu ── */
+        .move-map {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .move-map li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,255,136,.04);
+            border: 1px solid rgba(0,255,136,.12);
+            border-radius: 8px;
+            padding: 7px 9px;
+            font-size: 11px;
+            transition: border-color .15s, background .15s;
+        }
+        .move-map li:hover {
+            border-color: rgba(0,255,136,.3);
+            background: rgba(0,255,136,.07);
+        }
+        .move-map .mm-icon { font-size: 14px; line-height: 1; flex-shrink: 0; }
+        .move-map .mm-gesture { flex: 1; color: var(--text); line-height: 1.3; }
+        .move-map .mm-arrow { color: var(--muted); font-family: var(--mono); flex-shrink: 0; }
+        .move-map .mm-move {
+            font-weight: 700;
+            font-size: 9px;
+            letter-spacing: .4px;
+            text-transform: uppercase;
+            padding: 3px 7px;
+            border-radius: 5px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .mm-move.fwd    { color: var(--green);  background: rgba(0,255,136,.12); }
+        .mm-move.back   { color: var(--cyan);   background: rgba(0,212,255,.12); }
+        .mm-move.sprint { color: var(--green);  background: rgba(0,255,136,.2);  }
+        .mm-move.jump   { color: var(--red);    background: rgba(255,50,50,.14); }
+        .mm-move.turn   { color: var(--purple); background: rgba(168,85,247,.16); }
+        .mm-move.crouch { color: var(--orange); background: rgba(255,112,67,.14); }
+        .move-legend {
+            font-size: 10px;
+            color: var(--muted);
+            margin-top: 8px;
+            line-height: 1.6;
+        }
+        .move-legend strong { color: var(--text); }
+
         /* ── Shared panel items ── */
         .stat-row {
             display: flex; justify-content: space-between;
@@ -761,15 +810,66 @@
                 <div id="panel-gesture" class="mode-panel">
 
                     <div>
-                        <div class="section-title green">Gesture Control <span class="coming-soon-badge">Partial</span></div>
+                        <div class="section-title green">Gesture Control</div>
                         <button id="gesture-pose-btn">🕹️ Gesture OFF</button>
                         <div class="gesture-info" style="margin-top:10px;">
-                            <strong>How it works:</strong><br>
-                            Body movements trigger avatar actions instead of mapping directly to bones.<br><br>
-                            • Lean forward → walk<br>
-                            • Raise both arms → jump<br>
-                            • Bend knees → crouch<br>
-                            • Turn shoulders → rotate
+                            <strong>How it works:</strong> turn this on, step back so your
+                            upper body is in view, then use the hand gestures below to drive
+                            the avatar through the obstacle course.
+                        </div>
+                    </div>
+
+                    <!-- ══ Moves Mapping menu ══ -->
+                    <div>
+                        <div class="section-title green">Moves Mapping</div>
+                        <ul class="move-map">
+                            <li>
+                                <span class="mm-icon">🙋</span>
+                                <span class="mm-gesture">Right hand raised</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move fwd">Walk fwd</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">🤚</span>
+                                <span class="mm-gesture">Left hand raised</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move back">Walk back</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">🙌</span>
+                                <span class="mm-gesture">Both hands up</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move sprint">Sprint</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">🆙</span>
+                                <span class="mm-gesture">Both hands high (over head)</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move jump">Jump</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">👉</span>
+                                <span class="mm-gesture">Right arm out to side</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move turn">Turn right</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">👈</span>
+                                <span class="mm-gesture">Left arm out to side</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move turn">Turn left</span>
+                            </li>
+                            <li>
+                                <span class="mm-icon">🙇</span>
+                                <span class="mm-gesture">Both hands low (by hips)</span>
+                                <span class="mm-arrow">→</span>
+                                <span class="mm-move crouch">Crouch</span>
+                            </li>
+                        </ul>
+                        <div class="move-legend">
+                            Hold a gesture to keep moving. <strong>Crouch</strong> under the
+                            barrier, <strong>turn + walk</strong> to weave the walls,
+                            <strong>jump</strong> the gap, then walk up the ramp to the finish.
                         </div>
                     </div>
 
@@ -856,9 +956,13 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
+<!-- Environments (gesture-tab obstacle course) — load before avatar so classes exist -->
+<script src="/frontend/environments/obstacle_course.js"></script>
+
 <!-- App scripts -->
 <script src="/frontend/action_controller.js"></script>
 <script src="/frontend/avatar.js"></script>
+<script src="/frontend/pose_action_mapper.js"></script>
 <script src="/frontend/uncertainty_ui.js"></script>
 
 <script>
@@ -882,6 +986,16 @@ class PosiSimApp {
         this.keyboardCtrl = null;
         this.poseModeCtrl = null;
         this.keyHUD       = new KeyboardHUD();
+
+        // ── Gesture tab only ────────────────────────────────────────────────
+        // Hand-gesture → action mapper, and the obstacle-course environment.
+        // Both are inert outside gesture mode (mapper isn't called; env isn't
+        // attached to physics), so Live/Video behaviour is unchanged.
+        this.poseActionMapper = (typeof PoseActionMapper !== 'undefined')
+            ? new PoseActionMapper(this.actionCtrl) : null;
+        this.envManager = (typeof EnvironmentManager !== 'undefined')
+            ? new EnvironmentManager(null) : null;
+        this._courseEnv = null;
 
         // Speed estimation
         this._lastPos     = new THREE.Vector3();
@@ -933,6 +1047,11 @@ class PosiSimApp {
             document.getElementById('view-toggle').classList.remove('show');
         }
 
+        // Tear down the obstacle course when leaving the gesture tab.
+        if (this.appMode === 'gesture' && mode !== 'gesture') {
+            this._exitObstacleCourse();
+        }
+
         // Turn off pose if switching away from a pose-active mode
         if (this.poseModeCtrl && this.poseModeCtrl._poseMode) {
             this.poseModeCtrl._forceOff();
@@ -944,6 +1063,9 @@ class PosiSimApp {
         }
 
         this.appMode = mode;
+
+        // Build the obstacle course when entering the gesture tab.
+        if (mode === 'gesture') this._enterObstacleCourse();
 
         // Update tab UI
         document.querySelectorAll('.mode-tab').forEach(b =>
@@ -965,6 +1087,54 @@ class PosiSimApp {
         if (mode === 'video') {
             document.getElementById('cam-preview').classList.remove('show');
         }
+    }
+
+    // ── Obstacle course (gesture tab only) ──────────────────────────────────────
+    _enterObstacleCourse() {
+        if (!this.avatar || !this.envManager) return;
+        if (!this.envManager.scene) this.envManager.scene = this.avatar.scene;
+
+        // Hide the plain grid/floor — the course brings its own textured floor.
+        this.avatar.setDefaultEnvVisible(false);
+
+        // Build (or rebuild) the course and hand it to the physics controller.
+        this._courseEnv = this.envManager.load('obstacle_course');
+        this.actionCtrl.setEnvironment(this._courseEnv);
+
+        // Steady, slightly pulled-back follow cam so obstacles ahead are visible.
+        this.avatar.setFollowFraming(90, 380);
+
+        // Fresh start at the spawn — no stale offsets from a prior Live session.
+        this._resetForCourse();
+    }
+
+    _exitObstacleCourse() {
+        // Detach physics + dispose course meshes/textures, restore default floor.
+        this.actionCtrl.setEnvironment(null);
+        if (this.envManager) this.envManager.unload();
+        this._courseEnv = null;
+        if (this.avatar) this.avatar.setDefaultEnvVisible(true);
+        this._resetForCourse();
+    }
+
+    // Reset locomotion + clear any stale pose state so gesture/keyboard movement
+    // starts clean. Safe to call whether or not an environment is attached.
+    _resetForCourse() {
+        const a = this.actionCtrl;
+        a.active.clear();
+        a.position.set(0, 0, 0);
+        a.rotation        = 0;
+        a.verticalVel     = 0;
+        a.isGrounded      = true;
+        a.isCrouching     = false;
+        a.isSprinting     = false;
+        a.locomotionState = 'idle';
+        a._poseHipX       = undefined;
+        a._poseHipY       = undefined;
+        a._poseWalkSpeed  = 0;
+        if (this.poseActionMapper) this.poseActionMapper._cleanup();
+        if (a._env) a.position.y = a._env.getGroundY(0, 0);
+        if (this.keyboardCtrl && this.keyboardCtrl.clearKeys) this.keyboardCtrl.clearKeys();
     }
 
     // ── Buttons ───────────────────────────────────────────────────────────────
@@ -991,6 +1161,14 @@ class PosiSimApp {
             if (!this.avatar) {
                 this.avatar = new AvatarRenderer('3d-canvas');
                 document.getElementById('loading-overlay').style.display = 'flex';
+                // Wire the avatar's scene into the env manager. The course itself
+                // is built lazily — only when the Gesture tab is opened.
+                if (this.envManager) this.envManager.scene = this.avatar.scene;
+                // Defensive: if we somehow booted into gesture mode, build it now.
+                if (this.appMode === 'gesture') {
+                    this.avatar.setTranslationMode('gesture');
+                    this._enterObstacleCourse();
+                }
             }
 
             if (!this.keyboardCtrl) {
@@ -1039,8 +1217,9 @@ class PosiSimApp {
 
         if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
-        // Only drive pose from live camera when in live or gesture mode
-        if (this.appMode !== 'video') {
+        // ── LIVE mode: direct landmark→bone mapping + backend pose transform ──
+        // (Unchanged from the original — Live behaviour must stay identical.)
+        if (this.appMode === 'live') {
             // Live camera feed: the backend streams an annotated JPEG each frame.
             if (data.image) {
                 const camFeed = document.getElementById('cam-feed');
@@ -1074,6 +1253,29 @@ class PosiSimApp {
             if (data.pose_mode && data.detected_actions?.includes('jump')) {
                 this.actionCtrl.activate('jump');
             }
+
+        // ── GESTURE mode: simple hand gestures → predefined moves ─────────────
+        // The PoseActionMapper reads the webcam pose and activates locomotion
+        // actions; the avatar plays its procedural walk/run/crouch/jump anims and
+        // moves through the obstacle course. We deliberately do NOT apply the
+        // backend pose_transform here (it would fight the gesture mapper).
+        } else if (this.appMode === 'gesture') {
+            if (data.image) {
+                const camFeed = document.getElementById('cam-feed');
+                if (camFeed) camFeed.src = 'data:image/jpeg;base64,' + data.image;
+                document.getElementById('cam-preview').classList.add('show');
+            }
+
+            this.actionCtrl.poseMode = data.pose_mode ?? false;
+
+            if (this.poseActionMapper) {
+                this.poseActionMapper.update(data.landmarks ?? null, data.pose_mode ?? false);
+            }
+
+            // Keep head + fingers lively (these only touch head/finger bones, so
+            // they never conflict with the procedural locomotion animation).
+            if (this.avatar) this.avatar.updateFace(data.face_landmarks ?? null);
+            if (this.avatar) this.avatar.updateHands(data.hand_landmarks ?? null);
         }
 
         if (this.poseModeCtrl) {

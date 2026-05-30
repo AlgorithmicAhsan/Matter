@@ -194,6 +194,30 @@ class AvatarRenderer {
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
         this.scene.add(floor);
+
+        // Keep references so the gesture tab can hide the plain grid/floor while
+        // the obstacle course (which has its own floor) is shown, then restore it.
+        this._defaultEnv = { grid, floor };
+    }
+
+    /**
+     * Show or hide the default flat grid + floor. The gesture tab hides them
+     * while the obstacle course is active so the two floors don't overlap.
+     */
+    setDefaultEnvVisible(visible) {
+        if (!this._defaultEnv) return;
+        this._defaultEnv.grid.visible  = visible;
+        this._defaultEnv.floor.visible = visible;
+    }
+
+    /**
+     * Force the adaptive-camera targets. The gesture tab uses this to lock a
+     * steady follow distance so the avatar stays framed while it walks the
+     * obstacle course (setAutoFrame is not called in gesture mode).
+     */
+    setFollowFraming(offset, distance) {
+        this._focusOffsetTarget   = offset;
+        this._focusDistanceTarget = distance;
     }
 
     _loadModel() {

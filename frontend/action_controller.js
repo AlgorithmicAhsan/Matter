@@ -63,12 +63,37 @@ class ActionController {
         this.poseMode       = false;   // when true, keyboard is ignored
         this._poseWalkSpeed = 0;       // units/s set by pose transform
         this._poseHipX      = undefined; // hip X position from pose
+
+        // Optional collision environment (e.g. the gesture-tab obstacle course).
+        // When null, physics is flat-ground only — the original Live/Video
+        // behaviour is preserved exactly. Set via setEnvironment().
+        /** @type {ObstacleCourseEnvironment|null} */
+        this._env = null;
     }
 
     // ── Input ────────────────────────────────────────────────────────────────
     activate(action)   { this.active.add(action); }
     deactivate(action) { this.active.delete(action); }
     has(action)        { return this.active.has(action); }
+
+    /**
+     * Plug in (or clear) a collision environment so physics queries route
+     * through it. Pass null to return to flat-ground physics.
+     * @param {ObstacleCourseEnvironment|null} env
+     */
+    setEnvironment(env) {
+        this._env = env || null;
+        if (this._env) {
+            // Drop the avatar onto the new environment's surface at its current XZ.
+            const groundY = this._env.getGroundY(this.position.x, this.position.z);
+            this.config.groundY = groundY;
+            this.position.y     = groundY;
+            this.isGrounded     = true;
+            this.verticalVel    = 0;
+        } else {
+            this.config.groundY = 0;
+        }
+    }
 
     // ── Update ───────────────────────────────────────────────────────────────
     /**
@@ -120,28 +145,84 @@ class ActionController {
             this.deactivate(ActionType.JUMP); // one-shot
         }
 
-        // Vertical physics
-        if (!this.isGrounded) {
-            this.verticalVel    += cfg.gravity * dt;
-            this.position.y     += this.verticalVel * dt;
-            
-            // Only land if we are falling downwards!
-            // (If we jump while crouched, position.y might be < 0 for a few frames)
-            if (this.verticalVel <= 0 && this.position.y <= cfg.groundY) {
-                this.position.y  = cfg.groundY;
-                this.verticalVel = 0;
-                this.isGrounded  = true;
-            }
-        }
-
         // Convert local velocity → world space (rotate around Y)
         const sin = Math.sin(this.rotation);
         const cos = Math.cos(this.rotation);
         const worldX = localX * cos + localZ * sin;
         const worldZ = -localX * sin + localZ * cos;
 
-        this.position.x += worldX * dt;
-        this.position.z += worldZ * dt;
+        if (this._env) {
+            // ── Environment-aware physics (gesture-tab obstacle course) ──────
+            // Only runs when an environment is attached. Live/Video never set one.
+            const env   = this._env;
+            const prevX = this.position.x;
+            const prevZ = this.position.z;
+
+            // Horizontal move first, then resolve against the world.
+            this.position.x += worldX * dt;
+            this.position.z += worldZ * dt;
+
+            // Avatar's collision height shrinks while crouching (to clear beams).
+            const avatarH = this.isCrouching ? 75 : 150;
+
+            // 1) AABB wall collision — resolves XZ penetration.
+            env.resolveCollisions(this.position, 22, avatarH);
+
+            // 2) Surface height (ramps / elevated platform) at the new XZ.
+            const groundY = env.getGroundY(this.position.x, this.position.z);
+
+            // 3) Gap detection — if over a gap, the character falls.
+            const overGap = env.isOverGap(this.position.x, this.position.z);
+
+            // 4) Vertical physics with environment-aware groundY.
+            if (!this.isGrounded || overGap) {
+                this.isGrounded   = false;
+                this.verticalVel += cfg.gravity * dt;
+                this.position.y  += this.verticalVel * dt;
+
+                // Land on the surface below (only while descending, never over a gap).
+                if (!overGap && this.verticalVel <= 0 && this.position.y <= groundY) {
+                    this.position.y  = groundY;
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+                // Fell off the world — respawn at the course start.
+                if (this.position.y < -600) {
+                    this.position.set(0, 0, 0);
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+            } else {
+                // Snap to surface (handles ramp ascent/descent).
+                this.position.y  = groundY;
+                this.isGrounded  = true;
+                this.verticalVel = 0;
+            }
+
+            // 5) Low-barrier clearance — block an upright avatar from passing under a beam.
+            const maxH = env.getMaxAvatarHeight(this.position.x, this.position.z);
+            if (avatarH > maxH) {
+                this.position.x = prevX;
+                this.position.z = prevZ;
+            }
+        } else {
+            // ── Flat-ground physics (Live / Video — original behaviour) ──────
+            if (!this.isGrounded) {
+                this.verticalVel    += cfg.gravity * dt;
+                this.position.y     += this.verticalVel * dt;
+
+                // Only land if we are falling downwards!
+                // (If we jump while crouched, position.y might be < 0 for a few frames)
+                if (this.verticalVel <= 0 && this.position.y <= cfg.groundY) {
+                    this.position.y  = cfg.groundY;
+                    this.verticalVel = 0;
+                    this.isGrounded  = true;
+                }
+            }
+
+            this.position.x += worldX * dt;
+            this.position.z += worldZ * dt;
+        }
 
         // Determine locomotion state — crouch triggers even when standing still
         const moving     = localX !== 0 || localZ > 0;
