@@ -229,7 +229,7 @@ class ActionController {
         const movingBack = localZ < 0;
         const poseStrafe = this.poseMode && (this.has(ActionType.STRAFE_LEFT) || this.has(ActionType.STRAFE_RIGHT));
         if (!this.isGrounded)                    this.locomotionState = 'jump';
-        else if (this.isCrouching)               this.locomotionState = 'crouch';
+        else if (this.isCrouching)               this.locomotionState = (moving || movingBack) ? 'crouch_walk' : 'crouch';
         else if (this.isSprinting && moving)     this.locomotionState = 'run';
         else if (moving || movingBack || poseStrafe) this.locomotionState = 'walk';
         else                                     this.locomotionState = 'idle';

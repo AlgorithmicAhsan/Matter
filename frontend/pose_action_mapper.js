@@ -11,16 +11,14 @@
  *   GESTURE                                  →  MOVE
  *   ──────────────────────────────────────     ───────────────────────
  *   Right hand raised above shoulder         →  Walk forward
- *   Left hand raised above shoulder          →  Walk backward
+ *   Left hand raised above shoulder          →  Crouch-walk forward (duck + move)
  *   BOTH hands raised above shoulders        →  Sprint forward
  *   BOTH hands raised high (above head)      →  Jump   (one-shot)
  *   Right arm extended out to the side       →  Turn right
  *   Left arm extended out to the side        →  Turn left
- *   BOTH hands dropped low (near hips)        →  Crouch
  *
- * The first 4 (forward/backward/sprint/crouch) are ported faithfully from the
- * original Matter-abd mapper. Jump + the two turn gestures are added so the
- * obstacle course (jump gap + zig-zag walls) is completable with gestures alone.
+ * Left-hand-raise ducks the avatar AND keeps it walking forward, so you can
+ * advance under the low barrier in one gesture. There is no walk-backward.
  *
  * Detection uses normalized MediaPipe coords: x∈[0,1] (→ right in image),
  * y∈[0,1] (→ down). Thresholds are relative to the user's own shoulders/torso
@@ -44,10 +42,9 @@ class PoseActionMapper {
         };
 
         // ── Tunables ────────────────────────────────────────────────────────
-        this.UP_MARGIN     = 0.12;  // wrist this far above shoulder = "hand up"
-        this.LOW_MARGIN    = 0.35;  // wrist this far below shoulder = "hand low"
-        this.SIDE_FACTOR    = 1.15; // wrist out by >factor×shoulderSpan = "arm out"
-        this.HORIZ_BAND    = 0.18;  // |wrist.y - shoulder.y| within this = "horizontal"
+        this.UP_MARGIN   = 0.12;  // wrist this far above shoulder = "hand up"
+        this.SIDE_FACTOR = 1.15;  // wrist out by >factor×shoulderSpan = "arm out"
+        this.HORIZ_BAND  = 0.18;  // |wrist.y - shoulder.y| within this = "horizontal"
 
         // Edge-trigger latch for the one-shot jump gesture.
         this._jumpArmed = false;
@@ -84,21 +81,20 @@ class PoseActionMapper {
         const leftHandUp   = lw.y < (ls.y - this.UP_MARGIN);
         const rightHandUp  = rw.y < (rs.y - this.UP_MARGIN);
         const bothHandsUp  = leftHandUp && rightHandUp;
+        const leftOnly     = leftHandUp && !rightHandUp;
+        const rightOnly    = rightHandUp && !leftHandUp;
 
         const leftHandHigh  = lw.y < highY;
         const rightHandHigh = rw.y < highY;
         const bothHandsHigh = leftHandHigh && rightHandHigh;   // → JUMP
 
-        const bothHandsLow = (lw.y > (ls.y + this.LOW_MARGIN)) &&
-                             (rw.y > (rs.y + this.LOW_MARGIN));
-
         // Arm extended out to the side, roughly horizontal, and NOT raised up.
         const rightArmOut = Math.abs(rw.x - rs.x) > shoulderSpan * this.SIDE_FACTOR &&
                             Math.abs(rw.y - rs.y) < this.HORIZ_BAND &&
-                            !rightHandUp && !bothHandsLow;
+                            !rightHandUp;
         const leftArmOut  = Math.abs(lw.x - ls.x) > shoulderSpan * this.SIDE_FACTOR &&
                             Math.abs(lw.y - ls.y) < this.HORIZ_BAND &&
-                            !leftHandUp && !bothHandsLow;
+                            !leftHandUp;
 
         const A = ActionType;
 
@@ -116,17 +112,19 @@ class PoseActionMapper {
         if (bothHandsUp && !bothHandsHigh) this.actionCtrl.activate(A.SPRINT);
         else                               this.actionCtrl.deactivate(A.SPRINT);
 
-        // ── 4. FORWARD / BACKWARD ───────────────────────────────────────────
-        if (bothHandsUp || rightHandUp) {
+        // ── 4. CROUCH-WALK (left only) / FORWARD (right or both) ────────────
+        // Left hand raised → duck AND keep moving forward so you can advance
+        // under the low barrier. Right hand / both hands → walk forward upright.
+        if (leftOnly) {
+            this.actionCtrl.activate(A.CROUCH);
             this.actionCtrl.activate(A.MOVE_FORWARD);
-            this.actionCtrl.deactivate(A.MOVE_BACKWARD);
-        } else if (leftHandUp) {
-            this.actionCtrl.activate(A.MOVE_BACKWARD);
-            this.actionCtrl.deactivate(A.MOVE_FORWARD);
         } else {
-            this.actionCtrl.deactivate(A.MOVE_FORWARD);
-            this.actionCtrl.deactivate(A.MOVE_BACKWARD);
+            this.actionCtrl.deactivate(A.CROUCH);
+            if (bothHandsUp || rightOnly) this.actionCtrl.activate(A.MOVE_FORWARD);
+            else                          this.actionCtrl.deactivate(A.MOVE_FORWARD);
         }
+        // Walk-backward is not gesture-mapped.
+        this.actionCtrl.deactivate(A.MOVE_BACKWARD);
 
         // ── 5. TURN left / right (arm extended to the side) ─────────────────
         if (rightArmOut) this.actionCtrl.activate(A.TURN_RIGHT);
@@ -134,11 +132,6 @@ class PoseActionMapper {
 
         if (leftArmOut)  this.actionCtrl.activate(A.TURN_LEFT);
         else             this.actionCtrl.deactivate(A.TURN_LEFT);
-
-        // ── 6. CROUCH (both hands low, neither raised) ──────────────────────
-        const shouldCrouch = bothHandsLow && !leftHandUp && !rightHandUp;
-        if (shouldCrouch) this.actionCtrl.activate(A.CROUCH);
-        else              this.actionCtrl.deactivate(A.CROUCH);
     }
 
     /** Resets all gesture-driven actions. Call when gestures stop / no landmarks. */

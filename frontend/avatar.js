@@ -139,6 +139,22 @@ class AvatarRenderer {
         // 'gesture' = action/gesture-driven procedural animation
         this.translationMode = 'direct';
 
+        // ── Gesture-tab third-person follow camera ──────────────────────────
+        // When on, the camera locks behind the avatar (looking the way it walks)
+        // so the user can see what's ahead in the obstacle course. Off elsewhere.
+        this._thirdPersonFollow = false;
+        this._tpDistance = 300;
+        this._tpHeight   = 165;
+
+        // ── Crouch foot-planting ────────────────────────────────────────────
+        // A bent-knee squat alone lifts the feet off the floor (hovering) — and
+        // guessing how far to lower the root makes it sink through. Instead we
+        // MEASURE the avatar's actual foot height each frame and shift the root
+        // so the lowest foot stays planted. Geometry-independent, works at any
+        // squat depth. Applied in gesture mode while crouching only.
+        this._crouchYOffset = 0;   // eased vertical correction applied to the root
+        this._ankleRestY    = 0;   // ankle height above ground in the rest stance
+
         this._loadModel();
         this._animate();
         window.addEventListener('resize', () => this._onWindowResize());
@@ -220,6 +236,63 @@ class AvatarRenderer {
         this._focusDistanceTarget = distance;
     }
 
+    /**
+     * Lock the camera behind the avatar (third-person) — used by the gesture tab
+     * so the player sees the course ahead. Disables manual orbit while on.
+     */
+    setThirdPersonFollow(enabled) {
+        this._thirdPersonFollow = !!enabled;
+        if (this.controls) this.controls.enabled = !enabled;
+    }
+
+    // Place the camera behind + above the avatar, looking the way it travels.
+    _updateThirdPersonCamera() {
+        const r   = this.worldRotation;
+        const pos = this.worldPosition;
+        const fx  = Math.sin(r), fz = Math.cos(r);  // travel/forward direction
+
+        const desired = this._scratch.v0.set(
+            pos.x - fx * this._tpDistance,
+            pos.y + this._tpHeight,
+            pos.z - fz * this._tpDistance
+        );
+        this.camera.position.lerp(desired, 0.12);
+
+        // Aim slightly ahead of + above the avatar so the path forward is visible.
+        const tgt = this._scratch.v1.set(
+            pos.x + fx * 60,
+            pos.y + 95,
+            pos.z + fz * 60
+        );
+        this.controls.target.lerp(tgt, 0.2);
+        this.camera.lookAt(this.controls.target);
+    }
+
+    // Closed-loop foot planting for the crouch: each frame, measure the lowest
+    // foot and shift the root so it sits back on the ground. Self-correcting, so
+    // it works for any squat depth and on ramps. Eases back to 0 when not crouching.
+    _updateCrouchPlant() {
+        const crouching = (this.locomotionState === 'crouch' ||
+                           this.locomotionState === 'crouch_walk');
+        if (this.translationMode === 'gesture' && crouching) {
+            this.model.updateMatrixWorld(true);
+            const lf = this.bones[this.boneMap.leftFoot];
+            const rf = this.bones[this.boneMap.rightFoot];
+            if (lf && rf) {
+                const a = this._scratch.v0, b = this._scratch.v1;
+                lf.getWorldPosition(a);
+                rf.getWorldPosition(b);
+                const lowestAnkleY = Math.min(a.y, b.y);
+                // Where the ankle should sit so the sole grazes the ground.
+                const targetAnkleY = this.worldPosition.y + this._ankleRestY;
+                this._crouchYOffset += (targetAnkleY - lowestAnkleY) * 0.3;
+                this._crouchYOffset = Math.max(-160, Math.min(20, this._crouchYOffset));
+            }
+        } else {
+            this._crouchYOffset += (0 - this._crouchYOffset) * 0.25;
+        }
+    }
+
     _loadModel() {
         const loader = new THREE.GLTFLoader();
         loader.load('/models/avatar.glb', (gltf) => {
@@ -290,6 +363,18 @@ class AvatarRenderer {
                     .map(([k,v]) => [k, [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]]))
             ));
 
+            // Measure the ankle height in the rest stance (model grounded, feet
+            // at y=0) so crouch foot-planting knows where the feet should sit.
+            this.model.updateMatrixWorld(true);
+            const lfb = this.bones[this.boneMap.leftFoot];
+            const rfb = this.bones[this.boneMap.rightFoot];
+            if (lfb && rfb) {
+                const pa = new THREE.Vector3(), pb = new THREE.Vector3();
+                lfb.getWorldPosition(pa);
+                rfb.getWorldPosition(pb);
+                this._ankleRestY = Math.min(pa.y, pb.y);
+            }
+
             const overlay = document.getElementById('loading-overlay');
             if (overlay) overlay.style.display = 'none';
 
@@ -312,11 +397,16 @@ class AvatarRenderer {
 
         if (this.model) {
             this.model.position.x = position.x;
-            // FIX: always ADD the load-time Y offset on top of world Y
-            this.model.position.y = position.y + this._modelYOffset;
+            // ADD the load-time Y offset, plus the crouch foot-plant correction
+            // (computed in _animate by measuring the actual foot height).
+            this.model.position.y = position.y + this._modelYOffset + this._crouchYOffset;
             this.model.position.z = position.z;
             this.model.rotation.y = Math.PI + rotationRad;
         }
+
+        // Third-person (gesture tab): camera is driven in _animate; skip the
+        // orbit-preserving adaptive framing below.
+        if (this._thirdPersonFollow) return;
 
         // ── Adaptive framing ────────────────────────────────────────────────
         // Smooth the focus params toward their targets (set by setAutoFrame).
@@ -715,17 +805,33 @@ class AvatarRenderer {
             // Slight counter-rotation in spine
             blendBone(this.boneMap.spine1, 0, -phase * 0.05, 0, 0.1);
 
-        } else if (state === 'crouch') {
-            blendBone(this.boneMap.spine,      0.15, 0, 0,     0.15);
-            blendBone(this.boneMap.leftUpLeg,  0.35, 0,  0.04, 0.15);
-            blendBone(this.boneMap.rightUpLeg, 0.35, 0, -0.04, 0.15);
-            blendBone(this.boneMap.leftLeg,    1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.rightLeg,   1.20, 0, 0,     0.15);
-            blendBone(this.boneMap.leftFoot,  -0.50, 0, 0,     0.15);
-            blendBone(this.boneMap.rightFoot, -0.50, 0, 0,     0.15);
+        } else if (state === 'crouch' || state === 'crouch_walk') {
+            // Real squat. On this rig hip flexion (thigh up/forward) is a NEGATIVE
+            // upLeg X (same sign as the jump tuck) and knee fold is a POSITIVE leg
+            // X. The root is re-grounded by _updateCrouchPlant (measured feet), so
+            // these angles set the SHAPE and planting handles the height.
+            const hipFlex  = -0.95;  // thighs up/forward
+            const kneeFold =  1.55;  // shins fold back under
+            const ankleFix = -0.60;  // counter-rotate foot so the sole stays flat
+            const walking  = (state === 'crouch_walk');
+            const phase    = walking ? Math.sin(t * 2.6) : 0;
+            const swing    = 0.30;
+
+            blendBone(this.boneMap.spine,      0.20, 0, walking ? -phase * 0.05 : 0, 0.15);
+            blendBone(this.boneMap.leftUpLeg,  hipFlex + phase * swing, 0,  0.10, 0.25);
+            blendBone(this.boneMap.rightUpLeg, hipFlex - phase * swing, 0, -0.10, 0.25);
+            blendBone(this.boneMap.leftLeg,    kneeFold, 0, 0, 0.25);
+            blendBone(this.boneMap.rightLeg,   kneeFold, 0, 0, 0.25);
+            blendBone(this.boneMap.leftFoot,   ankleFix, 0, 0, 0.20);
+            blendBone(this.boneMap.rightFoot,  ankleFix, 0, 0, 0.20);
+
             if (!livePoseActive) {
-                blendBone(this.boneMap.leftArm,  0, 0, 1.5, 0.15);
-                blendBone(this.boneMap.rightArm, 0, 0, 1.5, 0.15);
+                // Arms tuck forward for balance, with a subtle counter-swing
+                // while crouch-walking.
+                blendBone(this.boneMap.leftArm,  0, walking ? -phase * 0.2 : 0, 1.20, 0.18);
+                blendBone(this.boneMap.rightArm, 0, walking ?  phase * 0.2 : 0, 1.20, 0.18);
+                blendBone(this.boneMap.leftForeArm,  0.5, 0, 0, 0.12);
+                blendBone(this.boneMap.rightForeArm, 0.5, 0, 0, 0.12);
             }
 
         } else if (state === 'jump') {
@@ -780,8 +886,12 @@ class AvatarRenderer {
         const now = performance.now();
         const dt  = Math.min((now - this._lastTime) / 1000, 0.05);
         this._lastTime = now;
-        if (this.model) this._applyLocomotionAnim(dt);
-        this.controls.update();
+        if (this.model) {
+            this._applyLocomotionAnim(dt);
+            this._updateCrouchPlant();
+        }
+        if (this._thirdPersonFollow) this._updateThirdPersonCamera();
+        else                         this.controls.update();
         this.renderer.render(this.scene, this.camera);
     }
 

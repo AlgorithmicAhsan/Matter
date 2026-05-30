@@ -833,7 +833,7 @@
                                 <span class="mm-icon">🤚</span>
                                 <span class="mm-gesture">Left hand raised</span>
                                 <span class="mm-arrow">→</span>
-                                <span class="mm-move back">Walk back</span>
+                                <span class="mm-move crouch">Crouch-walk</span>
                             </li>
                             <li>
                                 <span class="mm-icon">🙌</span>
@@ -859,17 +859,12 @@
                                 <span class="mm-arrow">→</span>
                                 <span class="mm-move turn">Turn left</span>
                             </li>
-                            <li>
-                                <span class="mm-icon">🙇</span>
-                                <span class="mm-gesture">Both hands low (by hips)</span>
-                                <span class="mm-arrow">→</span>
-                                <span class="mm-move crouch">Crouch</span>
-                            </li>
                         </ul>
                         <div class="move-legend">
-                            Hold a gesture to keep moving. <strong>Crouch</strong> under the
-                            barrier, <strong>turn + walk</strong> to weave the walls,
-                            <strong>jump</strong> the gap, then walk up the ramp to the finish.
+                            Hold a gesture to keep moving. Raise your <strong>left hand to
+                            crouch-walk</strong> under the barrier, <strong>turn + walk</strong>
+                            to weave the walls, <strong>jump</strong> the gap, then walk up the
+                            ramp to the finish.
                         </div>
                     </div>
 
@@ -1101,8 +1096,9 @@ class PosiSimApp {
         this._courseEnv = this.envManager.load('obstacle_course');
         this.actionCtrl.setEnvironment(this._courseEnv);
 
-        // Steady, slightly pulled-back follow cam so obstacles ahead are visible.
-        this.avatar.setFollowFraming(90, 380);
+        // Lock a third-person camera behind the avatar so the player can see
+        // what's ahead in the course (gesture tab only).
+        this.avatar.setThirdPersonFollow(true);
 
         // Fresh start at the spawn — no stale offsets from a prior Live session.
         this._resetForCourse();
@@ -1113,7 +1109,10 @@ class PosiSimApp {
         this.actionCtrl.setEnvironment(null);
         if (this.envManager) this.envManager.unload();
         this._courseEnv = null;
-        if (this.avatar) this.avatar.setDefaultEnvVisible(true);
+        if (this.avatar) {
+            this.avatar.setThirdPersonFollow(false);  // restore orbit camera
+            this.avatar.setDefaultEnvVisible(true);
+        }
         this._resetForCourse();
     }
 
@@ -1719,10 +1718,11 @@ class PosiSimApp {
             }
 
             const badge = document.getElementById('action-state');
-            badge.textContent = locomotionState.toUpperCase();
+            badge.textContent = (locomotionState === 'crouch_walk')
+                ? 'CROUCH WALK' : locomotionState.toUpperCase();
             badge.className   = '';
             if (locomotionState === 'run')    badge.classList.add('running');
-            if (locomotionState === 'crouch') badge.classList.add('crouching');
+            if (locomotionState === 'crouch' || locomotionState === 'crouch_walk') badge.classList.add('crouching');
             if (locomotionState === 'jump')   badge.classList.add('jumping');
         };
         requestAnimationFrame(tick);
