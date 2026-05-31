@@ -1,4 +1,4 @@
-# PosiSim Backend Dependencies
+# Matter Backend Dependencies
 # Install with: pip install -r requirements.txt
 
 # Core Computer Vision & Pose Detection

@@ -18,7 +18,7 @@ from bvh_writer import BVHWriter
 from actions import ActionController, ActionConfig, KeyboardController
 from action_detector import PoseActionDetector          # NEW
 
-app = FastAPI(title="PosiSim - Markerless Motion Capture")
+app = FastAPI(title="Matter - Markerless Motion Capture")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 MODELS_DIR   = Path(__file__).parent.parent / "models"
@@ -340,6 +340,6 @@ async def handle_command(command: dict, websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    print("Starting PosiSim backend...")
+    print("Starting Matter backend...")
     print("Open http://localhost:8000 in your browser.")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
