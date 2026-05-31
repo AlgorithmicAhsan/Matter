@@ -549,7 +549,7 @@ if __name__ == "__main__":
         ret, frame = cap.read()
         if not ret: break
 
-        landmarks, annotated = extractor.process_frame(frame)
+        landmarks, annotated, _ = extractor.process_frame(frame)
         actions = detector.detect_actions(landmarks)
 
         if not detector.calibrated:

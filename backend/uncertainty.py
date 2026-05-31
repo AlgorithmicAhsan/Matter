@@ -146,7 +146,7 @@ if __name__ == "__main__":
         if not ret:
             break
 
-        landmarks, annotated = extractor.process_frame(frame)
+        landmarks, annotated, _ = extractor.process_frame(frame)
         result = scorer.score(landmarks)
 
         # Display uncertainty info on frame

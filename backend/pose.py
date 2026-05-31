@@ -67,7 +67,7 @@ class PoseExtractor:
         results = self.pose.process(rgb)
 
         if not results.pose_landmarks:
-            return None, annotated
+            return None, annotated, None
 
         # Extract landmarks
         landmarks = []
@@ -203,7 +203,7 @@ if __name__ == "__main__":
             print("End of stream or failed to read frame.")
             break
 
-        landmarks, annotated_frame = extractor.process_frame(frame)
+        landmarks, annotated_frame, _ = extractor.process_frame(frame)
 
         if landmarks:
             print("First 3 landmarks:")

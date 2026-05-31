@@ -51,7 +51,15 @@ class SessionState:
         self.keyboard_ctrl = KeyboardController(self.action_ctrl)
         self.pose_detector = PoseActionDetector()       # NEW
         self.pose_mode     = False                      # NEW: toggled by frontend
+        self.camera_enabled = True                      # webcam active only in live/gesture
         self._last_update_time = time.time()
+
+        # Last processed video's pose sequence — used to export a BVH of an
+        # uploaded clip (Video mode), independent of the live webcam recording.
+        self.video_img_sequence   = []   # list of image-space landmark dicts (or None)
+        self.video_world_sequence = []   # list of world landmark dicts (or None)
+        self.video_trusted        = []   # per-frame trusted flag (precomputed)
+        self.video_fps            = 30.0
 
 state = SessionState()
 
@@ -95,25 +103,33 @@ async def process_video(file: UploadFile = File(...)):
 
     def _extract_poses(path: str):
         """CPU-bound: runs in thread pool, safe to block here."""
-        ext = PoseExtractor()
+        ext    = PoseExtractor()
+        scorer = UncertaintyScorer()   # fresh per-video, own history
         cap = cv2.VideoCapture(path)
         if not cap.isOpened():
             return None, "Could not open video file."
 
-        fps      = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        sequence = []
-        idx      = 0
+        fps        = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        sequence   = []
+        world_seq  = []   # kept server-side for BVH export; not sent to frontend
+        idx        = 0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            landmarks, _, _ = ext.process_frame(frame)
-            sequence.append({"frame_idx": idx, "landmarks": landmarks})
+            landmarks, _, world_landmarks = ext.process_frame(frame)
+            # Score uncertainty here, once, so the dashboard can show per-frame
+            # values during playback and the BVH export can reuse the trusted
+            # flags without re-scoring (which previously blocked the event loop).
+            unc = scorer.score(landmarks)
+            sequence.append({"frame_idx": idx, "landmarks": landmarks, "uncertainty": unc})
+            world_seq.append(world_landmarks)
             idx += 1
 
         cap.release()
-        return {"fps": round(fps, 2), "total_frames": idx, "landmark_sequence": sequence}, None
+        return {"fps": round(fps, 2), "total_frames": idx,
+                "landmark_sequence": sequence, "_world_sequence": world_seq}, None
 
     try:
         loop = asyncio.get_event_loop()
@@ -127,6 +143,13 @@ async def process_video(file: UploadFile = File(...)):
         print(f"[process_video] {filename}: {result['total_frames']} frames @ "
               f"{result['fps']} fps, {detected} with pose detected.")
 
+        # Keep the pose sequence server-side so Video mode can export a BVH of the
+        # whole clip. world_landmarks are 3D and never sent to the browser.
+        state.video_world_sequence = result.pop("_world_sequence")
+        state.video_img_sequence   = [f["landmarks"] for f in result["landmark_sequence"]]
+        state.video_trusted        = [f["uncertainty"]["trusted"] for f in result["landmark_sequence"]]
+        state.video_fps            = result["fps"]
+
         return JSONResponse(result)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
@@ -136,12 +159,6 @@ async def process_video(file: UploadFile = File(...)):
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("Client connected.")
-
-    state.cap = cv2.VideoCapture(state.source)
-    if not state.cap.isOpened():
-        await websocket.send_text(json.dumps({"error": "Could not open camera"}))
-        await websocket.close()
-        return
 
     state.running     = True
     state.frame_count = 0
@@ -156,6 +173,28 @@ async def websocket_endpoint(websocket: WebSocket):
                 pass
             except WebSocketDisconnect:
                 break
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                # A single malformed message must not tear down the live session.
+                print(f"Ignoring bad WS command: {type(e).__name__}: {e}")
+
+            # The webcam runs only in live/gesture modes. In video mode the
+            # frontend disables it, so we release the device and idle.
+            if not state.camera_enabled:
+                if state.cap is not None:
+                    state.cap.release()
+                    state.cap = None
+                    print("Camera paused (video mode).")
+                await asyncio.sleep(0.05)
+                continue
+
+            # (Re)open the camera when entering / returning to an active mode.
+            if state.cap is None or not state.cap.isOpened():
+                state.cap = cv2.VideoCapture(state.source)
+                if not state.cap.isOpened():
+                    await websocket.send_text(json.dumps({"error": "Could not open camera"}))
+                    await asyncio.sleep(0.2)
+                    continue
+                print("Camera opened.")
 
             ret, frame = state.cap.read()
             if not ret:
@@ -303,6 +342,59 @@ async def handle_command(command: dict, websocket: WebSocket):
                 len(state.writer.frames) /
                 max(len(state.writer.frames) + state.writer.skipped, 1) * 100, 1
             ),
+        }))
+
+    elif action == "set_camera":
+        # Frontend enables the webcam in live/gesture modes, disables it in video.
+        state.camera_enabled = bool(command.get("enabled", True))
+        print(f"Camera {'enabled' if state.camera_enabled else 'disabled'}.")
+
+    elif action == "save_video_bvh":
+        # Export the most recently processed video clip as a BVH. Builds from the
+        # stored pose sequence (not the live webcam), reusing the trusted flags
+        # computed during /process_video so no re-scoring is needed.
+        worlds  = state.video_world_sequence
+        imgs    = state.video_img_sequence
+        trusted = state.video_trusted
+        if not worlds:
+            await websocket.send_text(json.dumps({
+                "event": "bvh_saved", "filename": None,
+                "frames": 0, "skipped": 0, "coverage_pct": 0.0,
+            }))
+            return
+
+        # Optional frame range [start, end] from the Video-mode Start/Stop buttons.
+        # Defaults to the whole clip. Clamped to valid bounds.
+        n = len(worlds)
+        start = max(0, int(command.get("start", 0)))
+        end   = min(n - 1, int(command.get("end", n - 1)))
+        if end < start:
+            start, end = 0, n - 1
+
+        fps = int(round(state.video_fps)) or 30
+
+        def _build_bvh():
+            """Rotation math only — fast, but run off the event loop to be safe."""
+            writer = BVHWriter(fps=fps)
+            for i in range(start, end + 1):
+                writer.add_frame(imgs[i], worlds[i], trusted=trusted[i])
+            path = writer.save()
+            return writer.frames and len(writer.frames) or 0, writer.skipped, path
+
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            n_frames, n_skipped, filepath = await loop.run_in_executor(pool, _build_bvh)
+
+        filename = Path(filepath).name if filepath else None
+        total    = n_frames + n_skipped
+        print(f"Video BVH saved: {filename} ({n_frames} frames)")
+        await websocket.send_text(json.dumps({
+            "event":        "bvh_saved",
+            "filename":     filename,
+            "frames":       n_frames,
+            "skipped":      n_skipped,
+            "coverage_pct": round(n_frames / max(total, 1) * 100, 1),
         }))
 
     elif action == "set_source":

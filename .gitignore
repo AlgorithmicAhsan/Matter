@@ -1,3 +1,9 @@
+# Generated BVH recordings — runtime output, not source
+output/*.bvh
+
+# Dev-only BVH rotation round-trip test
+backend/_bvh_selftest.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

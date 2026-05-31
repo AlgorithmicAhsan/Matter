@@ -178,6 +178,15 @@ class AvatarRenderer {
         if (enabled) this._smoothLm = null; // clear stale EMA state
     }
 
+    /**
+     * Enable/disable the adaptive camera framing. Only Live mode drives the
+     * camera from the visible body region; in Video mode we turn it off so the
+     * user keeps full manual orbit/zoom control over the avatar.
+     */
+    setAutoFrameEnabled(enabled) {
+        this._autoFrame = !!enabled;
+    }
+
     _setupLighting() {
         // Very bright ambient — GLTF PBR needs this
         this.scene.add(new THREE.AmbientLight(0xffffff, 4.0));

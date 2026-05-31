@@ -169,33 +169,66 @@ def _get_position(world_landmarks, indices):
     pts = []
     for idx in indices:
         lm = world_landmarks[idx]
-        pts.append([lm["x"] * 100.0, lm["y"] * 100.0, lm["z"] * 100.0])
+        # Convert MediaPipe world space → BVH space by negating BOTH X and Y:
+        #   • Y: MediaPipe Y increases downward; BVH Y increases upward.
+        #   • X: MediaPipe's left-body landmarks sit on +X, but our skeleton anchors
+        #        the "Left" joints on -X. Without this flip each limb would start at
+        #        one hip/shoulder and cross to the opposite side ("opening inward").
+        # Negating two axes (not one or three) keeps the coordinate system right-
+        # handed, so the figure is not mirrored — only correctly re-oriented.
+        pts.append([-lm["x"] * 100.0, -lm["y"] * 100.0, lm["z"] * 100.0])
     return np.mean(pts, axis=0)
 
 
-def _rotation_to_euler_zxy(rest_dir, bone_vec):
+# Each non-terminal bone points from its own joint toward this child joint.
+# The observed (parent → child) vector is what we align the rest direction to.
+BONE_CHILD = {
+    "Hips":         "Spine",
+    "Spine":        "Neck",
+    "LeftArm":      "LeftForeArm",
+    "LeftForeArm":  "LeftHand",
+    "RightArm":     "RightForeArm",
+    "RightForeArm": "RightHand",
+    "LeftUpLeg":    "LeftLeg",
+    "LeftLeg":      "LeftFoot",
+    "RightUpLeg":   "RightLeg",
+    "RightLeg":     "RightFoot",
+}
+
+# Parent bone in the hierarchy. A joint's LOCAL rotation is its world rotation
+# expressed relative to its parent's world rotation. Root (Hips) has no parent.
+PARENT_BONE = {
+    "Hips":         None,
+    "Spine":        "Hips",
+    "LeftArm":      "Hips",
+    "LeftForeArm":  "LeftArm",
+    "RightArm":     "Hips",
+    "RightForeArm": "RightArm",
+    "LeftUpLeg":    "Hips",
+    "LeftLeg":      "LeftUpLeg",
+    "RightUpLeg":   "Hips",
+    "RightLeg":     "RightUpLeg",
+}
+
+
+def _swing_matrix(rest_dir, bone_vec):
     """
-    Compute the rotation that takes rest_dir to the direction of bone_vec,
-    then decompose it to ZXY Euler angles in degrees.
-
-    ZXY is the BVH channel order: Zrotation Xrotation Yrotation.
-    R = Ry · Rx · Rz  (last channel applied last = Y applied last).
-
-    This gives the LOCAL rotation of the bone relative to its T-pose direction,
-    which is exactly what BVH motion data stores.
+    World-space shortest-arc (swing) rotation matrix that maps rest_dir onto the
+    direction of bone_vec. No roll/twist is recovered — positions alone cannot
+    determine a bone's rotation about its own axis, so we use the minimal rotation.
+    Returns a 3x3 numpy array (identity if the bone has zero length).
     """
     rest = np.asarray(rest_dir, dtype=float)
-    actual_norm = np.linalg.norm(bone_vec)
-    if actual_norm < 1e-6:
-        return 0.0, 0.0, 0.0
-    actual = bone_vec / actual_norm
+    n = np.linalg.norm(bone_vec)
+    if n < 1e-6:
+        return np.eye(3)
+    actual = bone_vec / n
 
     dot = float(np.clip(np.dot(rest, actual), -1.0, 1.0))
+    if dot > 0.999999:                 # already aligned
+        return np.eye(3)
 
-    if dot > 0.9999:   # already aligned — no rotation
-        return 0.0, 0.0, 0.0
-
-    if dot < -0.9999:  # 180° flip — pick a stable perpendicular axis
+    if dot < -0.999999:                # 180° flip — choose any stable perpendicular
         perp = np.array([1.0, 0.0, 0.0]) if abs(rest[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
         axis = np.cross(rest, perp)
         axis /= np.linalg.norm(axis)
@@ -205,81 +238,80 @@ def _rotation_to_euler_zxy(rest_dir, bone_vec):
         axis /= np.linalg.norm(axis)
         angle = np.arccos(dot)
 
-    # Rodrigues' rotation matrix
     c, s = np.cos(angle), np.sin(angle)
     t = 1.0 - c
     x, y, z = axis
-    R = np.array([
+    return np.array([
         [t*x*x + c,    t*x*y - s*z,  t*x*z + s*y],
         [t*x*y + s*z,  t*y*y + c,    t*y*z - s*x],
         [t*x*z - s*y,  t*y*z + s*x,  t*z*z + c  ],
     ])
 
-    # ZXY Euler decomposition (R = Ry·Rx·Rz):
-    #   R[1][2] = -sin(rx)
-    #   R[0][2] = sin(ry)*cos(rx)
-    #   R[2][2] = cos(ry)*cos(rx)
-    #   R[1][0] = cos(rx)*sin(rz)
-    #   R[1][1] = cos(rx)*cos(rz)
-    rx = np.degrees(np.arcsin(np.clip(-R[1, 2], -1.0, 1.0)))
-    if abs(R[1, 2]) < 0.9999:  # no gimbal lock
-        ry = np.degrees(np.arctan2(R[0, 2], R[2, 2]))
-        rz = np.degrees(np.arctan2(R[1, 0], R[1, 1]))
-    else:                       # gimbal lock: rz is indeterminate, set to 0
+
+def _matrix_to_euler_zxy(R):
+    """
+    Decompose a rotation matrix into BVH ZXY Euler angles (degrees), matching the
+    channel order 'Zrotation Xrotation Yrotation', i.e. R = Rz · Rx · Ry — the
+    convention used by Blender's and Three.js's BVH importers.
+
+    From R = Rz·Rx·Ry:
+        R[2][1] =  sin(rx)
+        R[2][0] = -cos(rx)·sin(ry),  R[2][2] = cos(rx)·cos(ry)
+        R[0][1] = -cos(rx)·sin(rz),  R[1][1] = cos(rx)·cos(rz)
+    Returns (rz, rx, ry) in degrees — the order the channels are written.
+    """
+    sx = float(np.clip(R[2, 1], -1.0, 1.0))
+    rx = np.arcsin(sx)
+    if abs(sx) < 0.999999:             # no gimbal lock
+        ry = np.arctan2(-R[2, 0], R[2, 2])
+        rz = np.arctan2(-R[0, 1], R[1, 1])
+    else:                              # gimbal lock (rx = ±90°): fold y into z
         ry = 0.0
-        rz = np.degrees(np.arctan2(-R[0, 1], R[0, 0]))
-
-    return rz, rx, ry
-
-
-def _bone_rot(joint, parent_pos, child_pos):
-    """Wrapper: compute rotation for a named bone from world positions."""
-    return _rotation_to_euler_zxy(REST_DIRECTIONS[joint], child_pos - parent_pos)
+        rz = np.arctan2(R[1, 0], R[0, 0])
+    return np.degrees(rz), np.degrees(rx), np.degrees(ry)
 
 
 def landmarks_to_frame(world_landmarks):
     """
     Convert one set of MediaPipe world_landmarks to a BVH motion frame.
 
-    Each bone's rotation is the angle needed to rotate the bone FROM its
-    T-pose rest direction TO the actual direction observed in this frame.
-    This is exactly what BVH rotation channels represent.
+    For each bone we first build its WORLD rotation (shortest arc from the T-pose
+    rest direction to the observed parent→child direction). We then convert that
+    to a LOCAL rotation relative to the parent bone — because BVH rotations
+    compound down the hierarchy, a joint must store only the rotation *added* on
+    top of its parent. Finally each local rotation is decomposed to ZXY Euler.
 
-    Returns a flat list of floats: 6 values for Hips + 3 for each other joint
-    = 48 values total, matching the channel count in BVH_HIERARCHY.
+    Returns a flat list of 48 floats: 6 channels for Hips (pos + rot) plus 3 for
+    each of the other 14 joints, matching the channel layout in BVH_HIERARCHY.
     """
     pos = {joint: _get_position(world_landmarks, indices)
            for joint, indices in LANDMARK_INDICES.items()}
 
+    # World-space rotation matrix for every non-terminal bone.
+    world_rot = {
+        bone: _swing_matrix(REST_DIRECTIONS[bone], pos[child] - pos[bone])
+        for bone, child in BONE_CHILD.items()
+    }
+
     frame_data = []
     for joint in JOINT_ORDER:
         if joint in TERMINAL_JOINTS:
+            # End-effectors have no child to aim at and no children of their own,
+            # so their rotation is irrelevant — write zeros.
             frame_data.extend([0.0, 0.0, 0.0])
             continue
 
         if joint == "Hips":
-            # Root: world position (world_landmarks are hip-centered so this is
-            # always near 0,0,0 — no absolute room-scale tracking from MediaPipe)
+            # Root translation: world_landmarks are hip-centered, so the hips are
+            # always at the origin — no global motion is available to record.
             frame_data.extend([0.0, 0.0, 0.0])
-            frame_data.extend(_bone_rot("Hips", pos["Hips"], pos["Spine"]))
-        elif joint == "Spine":
-            frame_data.extend(_bone_rot("Spine", pos["Spine"], pos["Neck"]))
-        elif joint == "LeftArm":
-            frame_data.extend(_bone_rot("LeftArm", pos["LeftArm"], pos["LeftForeArm"]))
-        elif joint == "LeftForeArm":
-            frame_data.extend(_bone_rot("LeftForeArm", pos["LeftForeArm"], pos["LeftHand"]))
-        elif joint == "RightArm":
-            frame_data.extend(_bone_rot("RightArm", pos["RightArm"], pos["RightForeArm"]))
-        elif joint == "RightForeArm":
-            frame_data.extend(_bone_rot("RightForeArm", pos["RightForeArm"], pos["RightHand"]))
-        elif joint == "LeftUpLeg":
-            frame_data.extend(_bone_rot("LeftUpLeg", pos["LeftUpLeg"], pos["LeftLeg"]))
-        elif joint == "LeftLeg":
-            frame_data.extend(_bone_rot("LeftLeg", pos["LeftLeg"], pos["LeftFoot"]))
-        elif joint == "RightUpLeg":
-            frame_data.extend(_bone_rot("RightUpLeg", pos["RightUpLeg"], pos["RightLeg"]))
-        elif joint == "RightLeg":
-            frame_data.extend(_bone_rot("RightLeg", pos["RightLeg"], pos["RightFoot"]))
+            local = world_rot["Hips"]
+        else:
+            parent = PARENT_BONE[joint]
+            # local = parent_world⁻¹ · bone_world   (rotation matrices: inverse = transpose)
+            local = world_rot[parent].T @ world_rot[joint]
+
+        frame_data.extend(_matrix_to_euler_zxy(local))
 
     return frame_data
 

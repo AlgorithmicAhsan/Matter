@@ -1008,6 +1008,12 @@ class MatterApp {
         this._videoBlobUrl     = null;  // object URL for the uploaded file
         this._videoView        = 'avatar'; // 'avatar' | 'both' | 'video'
 
+        // Video-mode recording: capture a chosen frame RANGE via Start/Stop,
+        // then export only that range with Save BVH.
+        this._videoRecording   = false;
+        this._videoRecStart    = 0;
+        this._videoRecEnd      = 0;
+
         // MediaPipe skeleton connections (matches pose.py POSE_CONNECTIONS)
         this._POSE_CONNECTIONS = [
             [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],
@@ -1059,6 +1065,32 @@ class MatterApp {
         }
 
         this.appMode = mode;
+
+        // Adaptive camera framing belongs to Live mode only. In Video mode the
+        // user gets free manual orbit/zoom; Gesture uses third-person follow.
+        if (this.avatar) this.avatar.setAutoFrameEnabled(mode === 'live');
+
+        // The webcam is only needed in live/gesture modes — turn it off in video.
+        const camOn = (mode !== 'video');
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ action: 'set_camera', enabled: camOn }));
+        }
+        document.getElementById('cam-status').textContent = camOn ? 'Active' : 'Off';
+        if (mode === 'video') {
+            // Refresh the dashboard from the video (not stale live data). If a clip
+            // is loaded, render its current frame so Frame + uncertainty reflect it.
+            this._videoRecording = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled  = true;
+            // Save is available once a clip is loaded (exports whole clip, or the
+            // recorded range after a Start/Stop).
+            document.getElementById('save-btn').disabled = !this._videoSequence.length;
+            if (this._videoSequence.length) {
+                this._renderVideoFrame(this._videoCurrentFrame || 0);
+            } else {
+                document.getElementById('frame-count').textContent = 0;
+            }
+        }
 
         // Build the obstacle course when entering the gesture tab.
         if (mode === 'gesture') this._enterObstacleCourse();
@@ -1179,7 +1211,11 @@ class MatterApp {
 
     // ── WebSocket ─────────────────────────────────────────────────────────────
     _connectWebSocket() {
-        this.ws = new WebSocket('ws://localhost:8000/ws');
+        // Derive the WS URL from the page origin so it works on any host/port and
+        // over HTTPS (wss). Hardcoding localhost:8000 broke non-default ports and
+        // remote/LAN access.
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        this.ws = new WebSocket(`${proto}//${location.host}/ws`);
 
         this.ws.onopen = () => {
             this._setWSStatus('Connected', true);
@@ -1231,17 +1267,22 @@ class MatterApp {
     _handleFrame(data) {
         this._frameCount++;
 
-        document.getElementById('frame-count').textContent    = data.frame;
-        document.getElementById('bvh-frames').textContent     = data.bvh_frames;
-        document.getElementById('skipped-frames').textContent = data.bvh_skipped;
-        document.getElementById('cam-status').textContent     = 'Active';
+        document.getElementById('cam-status').textContent = 'Active';
 
-        if (data.frame > 0) {
-            const cov = ((data.bvh_frames / (data.frame + 1)) * 100).toFixed(1);
-            document.getElementById('coverage-pct').textContent = cov + '%';
+        // In Video mode the dashboard reflects the uploaded clip (updated from
+        // _renderVideoFrame), not the live webcam — so skip the live stats here.
+        if (this.appMode !== 'video') {
+            document.getElementById('frame-count').textContent    = data.frame;
+            document.getElementById('bvh-frames').textContent     = data.bvh_frames;
+            document.getElementById('skipped-frames').textContent = data.bvh_skipped;
+
+            if (data.frame > 0) {
+                const cov = ((data.bvh_frames / (data.frame + 1)) * 100).toFixed(1);
+                document.getElementById('coverage-pct').textContent = cov + '%';
+            }
+
+            if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
         }
-
-        if (this.ui && data.uncertainty) this.ui.update(data.uncertainty);
 
         // ── LIVE mode: direct landmark→bone mapping + backend pose transform ──
         // (Unchanged from the original — Live behaviour must stay identical.)
@@ -1335,8 +1376,14 @@ class MatterApp {
                 document.getElementById('stop-btn').disabled  = false;
                 break;
             case 'bvh_saved':
-                document.getElementById('save-btn').disabled = true;
-                alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
+                document.getElementById('countdown-overlay').classList.remove('show');
+                // Keep Save usable in Video mode for re-export; lock it in live mode.
+                document.getElementById('save-btn').disabled = (this.appMode !== 'video');
+                if (data.filename) {
+                    alert(`BVH saved: ${data.filename}\nFrames: ${data.frames}, Skipped: ${data.skipped}, Coverage: ${data.coverage_pct}%`);
+                } else {
+                    alert('Nothing to export — process a video first.');
+                }
                 break;
         }
     }
@@ -1527,7 +1574,10 @@ class MatterApp {
                 // Approach 88% asymptotically so it never quite reaches it
                 barPct = 88 * (1 - Math.exp(-3 * elapsed / estMs));
                 barEl.style.width = barPct.toFixed(1) + '%';
-                const framesEst = Math.round((elapsed / estMs) * duration * 30);
+                // Cap the estimate at the clip's true frame count (~duration×30)
+                // so it never overshoots when CPU extraction runs slower than est.
+                const totalEst  = Math.round(duration * 30);
+                const framesEst = Math.min(Math.round((elapsed / estMs) * totalEst), totalEst);
                 textEl.textContent = `Extracting poses… (~${framesEst} frames)`;
             }, 200);
 
@@ -1546,6 +1596,25 @@ class MatterApp {
             this._videoSequence     = data.landmark_sequence;
             this._videoFPS          = data.fps;
             this._videoCurrentFrame = 0;
+            this._videoRecording    = false;
+            this._videoRecStart     = 0;
+            this._videoRecEnd       = 0;
+
+            // A clip is loaded → enable Save (whole clip) and the Start range button.
+            document.getElementById('save-btn').disabled  = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled  = true;
+
+            // Dashboard now reflects the clip: total trusted frames = BVH frames.
+            document.getElementById('frame-count').textContent = 0;
+            const trustedCount = this._videoSequence.filter(f => f.uncertainty?.trusted).length;
+            const skippedCount = this._videoSequence.length - trustedCount;
+            document.getElementById('bvh-frames').textContent     = trustedCount;
+            document.getElementById('skipped-frames').textContent = skippedCount;
+            document.getElementById('coverage-pct').textContent =
+                (this._videoSequence.length
+                    ? (trustedCount / this._videoSequence.length * 100).toFixed(1)
+                    : '0') + '%';
 
             // Populate info box
             document.getElementById('video-filename').textContent = file.name;
@@ -1668,6 +1737,28 @@ class MatterApp {
     _renderVideoFrame(idx) {
         const frame = this._videoSequence[idx];
 
+        // Dashboard: show this video frame's index + its uncertainty (computed
+        // server-side at upload time), instead of the live webcam values.
+        document.getElementById('frame-count').textContent = idx;
+        if (this.ui && frame?.uncertainty) this.ui.update(frame.uncertainty);
+
+        // While recording a range, tick the trusted/skipped/coverage counters for
+        // the captured span [recStart … current frame].
+        if (this._videoRecording) {
+            this._videoRecEnd = idx;
+            const a = Math.min(this._videoRecStart, idx);
+            const b = Math.max(this._videoRecStart, idx);
+            let trusted = 0, total = 0;
+            for (let i = a; i <= b; i++) {
+                total++;
+                if (this._videoSequence[i]?.uncertainty?.trusted) trusted++;
+            }
+            document.getElementById('bvh-frames').textContent     = trusted;
+            document.getElementById('skipped-frames').textContent = total - trusted;
+            document.getElementById('coverage-pct').textContent   =
+                (total ? (trusted / total * 100).toFixed(1) : '0') + '%';
+        }
+
         // Drive avatar bones
         if (frame?.landmarks && this.avatar) {
             this.avatar.updatePose(frame.landmarks);
@@ -1769,17 +1860,68 @@ class MatterApp {
 
     // ── Recording ─────────────────────────────────────────────────────────────
     _startRecording() {
+        // Video mode: Start marks the beginning of a frame range and plays the
+        // clip so frames advance. Stop ends the range; Save exports just that range.
+        if (this.appMode === 'video') { this._videoRecordStart(); return; }
         this._showCountdown('Recording starts in…');
         setTimeout(() => this.ws.send(JSON.stringify({ action: 'start_recording' })), 5000);
     }
+
     _stopRecording() {
+        if (this.appMode === 'video') { this._videoRecordStop(); return; }
         this.ws.send(JSON.stringify({ action: 'stop_recording' }));
         this.recording = false;
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').disabled  = true;
         document.getElementById('save-btn').disabled  = false;
     }
-    _saveBVH() { this.ws.send(JSON.stringify({ action: 'save_bvh' })); }
+
+    _saveBVH() {
+        if (this.appMode === 'video') { this._exportVideoBVH(); return; }
+        this.ws.send(JSON.stringify({ action: 'save_bvh' }));
+    }
+
+    // Video mode — begin recording a range from the current frame.
+    _videoRecordStart() {
+        if (!this._videoSequence.length) { alert('Process a video first.'); return; }
+        this._videoRecording = true;
+        this._videoRecStart  = this._videoCurrentFrame;
+        this._videoRecEnd    = this._videoCurrentFrame;
+        // Reset the recorded-range counters; they tick up as the clip plays.
+        document.getElementById('bvh-frames').textContent     = 0;
+        document.getElementById('skipped-frames').textContent = 0;
+        document.getElementById('coverage-pct').textContent   = '0%';
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('stop-btn').disabled  = false;
+        document.getElementById('save-btn').disabled  = true;
+        if (!this._videoPlaying) this._videoPlay();   // advance frames to record
+    }
+
+    // Video mode — end the recorded range at the current frame.
+    _videoRecordStop() {
+        if (!this._videoRecording) return;
+        this._videoRecording = false;
+        this._videoRecEnd    = this._videoCurrentFrame;
+        this._videoPause();
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('stop-btn').disabled  = true;
+        document.getElementById('save-btn').disabled  = false;
+    }
+
+    // Export the recorded frame range (or the whole clip if none was marked).
+    _exportVideoBVH() {
+        if (!this._videoSequence.length) { alert('Process a video first.'); return; }
+        let start = 0, end = this._videoSequence.length - 1;
+        if (this._videoRecEnd !== this._videoRecStart) {
+            start = Math.min(this._videoRecStart, this._videoRecEnd);
+            end   = Math.max(this._videoRecStart, this._videoRecEnd);
+        }
+        const overlay = document.getElementById('countdown-overlay');
+        document.getElementById('countdown-number').textContent = '⏳';
+        document.getElementById('countdown-label').textContent  = 'Exporting BVH…';
+        overlay.classList.add('show');
+        this.ws.send(JSON.stringify({ action: 'save_video_bvh', start, end }));
+    }
 
     // ── Reset ─────────────────────────────────────────────────────────────────
     _resetAvatar() {
