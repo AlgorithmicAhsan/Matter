@@ -8,10 +8,44 @@ Three operating modes are available in a single browser UI: **Live** (webcam →
 
 ## Research Basis
 
-| | Paper |
-|---|---|
-| **Paper 1** | *A Dataset and Evaluation for Complex 4D Markerless Human Motion Capture* — informs the multi-landmark pipeline and evaluation approach. |
-| **Paper 2** | *Uncertainty-Aware Mapping from 3D Keypoints to Anatomical Landmarks for Markerless Biomechanics* — directly implemented as the aleatoric + epistemic uncertainty scorer that gates BVH recording. |
+### Paper 1 — HUM4D Dataset & Evaluation
+> *A Dataset and Evaluation for Complex 4D Markerless Human Motion Capture*
+> Park, Naduthodi, Kumar — Texas A&M University (arXiv:2604.12765, Apr 2026)
+
+HUM4D introduces a large-scale benchmark for markerless 4D human motion capture recorded in a professional MoCap studio with:
+- **44 synchronized Vicon infrared cameras** for marker-based ground truth at 120 fps
+- **6 Intel RealSense D-455 RGB-D cameras** in a 360° circular configuration at 720p
+- **83,768 synchronized frames** across 52 distinct action sequences (14 single-person, 41 multi-person)
+- Challenging conditions: severe inter-person occlusions, identity swaps, rapid position exchanges, near-far camera variation
+
+The paper benchmarks current SOTA markerless MoCap models on this data and reveals significant performance degradation under real-world complexity — motivating the need for uncertainty-aware quality control.
+
+**How Matter uses it:** HUM4D's evaluation framework directly informs Matter's multi-model pipeline design (body + face + hands in parallel), the use of world-space 3D landmarks alongside image-space coordinates, and the emphasis on handling occlusion gracefully through uncertainty gating rather than blind frame acceptance.
+
+---
+
+### Paper 2 — Uncertainty-Aware Mapping
+> *Uncertainty-Aware Mapping from 3D Keypoints to Anatomical Landmarks for Markerless Biomechanics*
+> Pace, De Nunzio, De Stefano, Fontanella, Molinara — University of Cassino / LUNEX Luxembourg (arXiv:2603.26844, Mar 2026)
+
+This paper investigates predictive uncertainty as a frame-wise quality control signal for mapping 3D pose keypoints to anatomical landmarks. Key contributions:
+
+| Concept | Paper detail | Matter implementation |
+|---|---|---|
+| **Aleatoric uncertainty** | Heteroscedastic regression; models irreducible observation noise | Inverted MediaPipe visibility scores averaged across all 33 landmarks |
+| **Epistemic uncertainty** | Monte Carlo Dropout, M=50 stochastic forward passes at inference | 20 Gaussian noise passes (σ=0.01) measuring per-landmark variance |
+| **Total uncertainty** | σ²_tot = σ²_epi + σ²_ale, aggregated across landmarks | `aleatoric + epistemic`, clamped to [0, 1], threshold 0.7 |
+| **Risk-coverage gating** | Retain only frames below uncertainty threshold | `BVHWriter.add_frame(trusted=...)` skips untrusted frames |
+| **Coverage stats** | Risk(c) = E[e_t | u_t ≤ u_c] at coverage level c | `UncertaintyScorer.coverage_stats()` |
+
+**Paper's key results (evaluated on AMASS dataset, 1,176 subjects, 221 hours):**
+- Epistemic uncertainty correlates strongly with landmark error: **Spearman ρ = 0.63**
+- At 10% coverage (keeping only the most confident frames): error reduced to **16.8 mm** (~34% relative reduction)
+- Outlier detection (frames with error > 50 mm): **ROC-AUC = 0.92**
+- Reliability ranking stable under Gaussian noise up to σ = 30 mm (Spearman ρ remains 0.593)
+- **Key finding:** epistemic uncertainty dominates — aleatoric uncertainty provides limited additional benefit, so total uncertainty closely tracks epistemic alone
+
+**Why epistemic dominates:** failure modes in keypoint-to-landmark mapping are driven by model uncertainty about underrepresented poses (extreme joint flexion, self-occlusion, rapid transitions) rather than sensor-level observation noise.
 
 ---
 
