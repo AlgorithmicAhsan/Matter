@@ -202,7 +202,7 @@ async def websocket_endpoint(websocket: WebSocket):
             frame_base64 = base64.b64encode(buffer).decode("utf-8")
 
             if state.recording:
-                state.writer.add_frame(landmarks, trusted=uncertainty_result["trusted"])
+                state.writer.add_frame(landmarks, world_landmarks, trusted=uncertainty_result["trusted"])
 
             payload = {
                 "frame":       state.frame_count,
