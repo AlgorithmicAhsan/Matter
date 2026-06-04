@@ -1220,6 +1220,10 @@ class MatterApp {
         this.ws.onopen = () => {
             this._setWSStatus('Connected', true);
 
+            // Sync the camera state to the current mode on (re)connect, so a prior
+            // Video-mode session can't leave the webcam disabled in Live/Gesture.
+            this.ws.send(JSON.stringify({ action: 'set_camera', enabled: this.appMode !== 'video' }));
+
             if (!this.avatar) {
                 this.avatar = new AvatarRenderer('3d-canvas');
                 document.getElementById('loading-overlay').style.display = 'flex';
@@ -1977,7 +1981,12 @@ class MatterApp {
     }
 }
 
-window.addEventListener('load', () => { window.matterApp = new MatterApp(); });
+window.addEventListener('load', () => {
+    // Expose under both names: the app was renamed PosiSim → Matter, but
+    // action_controller.js (PoseModeController) still references window.posiSimApp
+    // for the calibration countdown and set_pose_mode send. Alias keeps both working.
+    window.matterApp = window.posiSimApp = new MatterApp();
+});
 </script>
 </body>
 </html>

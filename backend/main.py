@@ -160,11 +160,18 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("Client connected.")
 
-    state.running     = True
-    state.frame_count = 0
+    state.running        = True
+    state.frame_count    = 0
+    # A fresh page always boots in Live mode, so the webcam must be on. Reset here
+    # so a prior Video-mode session (which disabled it) can't leave it stuck off
+    # across a reconnect/refresh.
+    state.camera_enabled = True
 
     try:
-        while state.running:
+        # Loop on THIS connection's own lifecycle (break on disconnect below).
+        # Don't gate on the shared state.running flag — a previous connection's
+        # cleanup could otherwise terminate a freshly-opened session on refresh.
+        while True:
             try:
                 data    = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
                 command = json.loads(data)
